@@ -12,8 +12,8 @@ class RGBEnv(Env):
             self._observation_space = Box(low=0.0, high=1.0, shape=(42, 42, 3)) # 42, 42, 3
         else:
             self._observation_space = Box(low=0.0, high=1.0, shape=(42, 42, 1)) # 42, 42, 1
-        self.spec = self._env.spec
-        self.spec.reward_threshold = self.spec.reward_threshold or float('inf')
+        self._spec = self._env.spec
+        self._spec.reward_threshold = self._spec.reward_threshold or float('inf')
 
     @property
     def action_space(self):
