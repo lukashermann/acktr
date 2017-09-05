@@ -16,7 +16,7 @@ import argparse
 import kfac
 import shutil
 import pickle
-#test
+#test2
 
 parser = argparse.ArgumentParser(description="Run commands")
 # GENERAL HYPERPARAMETERS
