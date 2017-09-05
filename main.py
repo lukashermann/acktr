@@ -16,6 +16,7 @@ import argparse
 import kfac
 import shutil
 import pickle
+#test
 
 parser = argparse.ArgumentParser(description="Run commands")
 # GENERAL HYPERPARAMETERS
@@ -31,7 +32,7 @@ parser.add_argument('-l', '--lam', default=0.97, type=float,
                     help="Lambda value to reduce variance see GAE")
 parser.add_argument('-s', '--seed', default=1, type=int,
                     help="Seed")
-parser.add_argument('--log-dir', default="/tmp/cont_control/unknown", type=str,
+parser.add_argument('--log-dir', default="./logs/", type=str,
                     help="Folder to save")
 # NEURAL NETWORK ARCHITECTURE
 parser.add_argument('--weight-decay-fc', default=3e-4, type=float, help="weight decay for fc layer")
