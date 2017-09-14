@@ -31,7 +31,7 @@ parser.add_argument('-l', '--lam', default=0.97, type=float,
                     help="Lambda value to reduce variance see GAE")
 parser.add_argument('-s', '--seed', default=1, type=int,
                     help="Seed")
-parser.add_argument('--log-dir', default="/tmp/cont_control/unknown", type=str,
+parser.add_argument('--log-dir', default="./test_logs", type=str,
                     help="Folder to save")
 # NEURAL NETWORK ARCHITECTURE
 parser.add_argument('--weight-decay-fc', default=3e-4, type=float, help="weight decay for fc layer")
@@ -85,11 +85,10 @@ class AsyncNGAgent(object):
     def __init__(self, env, args):
         self.env = env
         self.config = config = args
-        self.config.max_pathlength = env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
+        self.config.max_pathlength = env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
         utils.weight_decay_conv = self.config.weight_decay_conv
-
         # hardcoded for now
         if self.config.use_adam:
             self.config.kl_desired = 0.002
@@ -283,7 +282,7 @@ class AsyncNGAgent(object):
                 [path["rewards"].sum() for path in paths])
 
             print "\n********** Iteration %i ************" % self.iter
-            if episoderewards.mean() >= self.env.spec.reward_threshold:
+            if episoderewards.mean() >= self.env._spec.reward_threshold:
                 print "Solved Env"
                 self.solved = True
 

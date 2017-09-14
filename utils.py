@@ -11,6 +11,7 @@ from PIL import Image
 import os
 import shutil
 import copy
+import cv2
 
 dtype = tf.float32
 weight_decay_fc = 0.0
@@ -95,7 +96,11 @@ def rollout(env, agent, max_pathlength, n_timesteps):
         agent.prev_obs *= 0.0
         terminated = False
 
-        for _ in xrange(max_pathlength):
+        for j in xrange(max_pathlength):
+            if agent.save_frames:
+                frame = env.render(mode="rgb_array")
+
+                cv2.imwrite(agent.img_save_path + "iter_"+str(agent.iteration)+"/img_" + str(j) + ".png", frame)
             action, action_dist, ob = agent.act(ob)
             obs.append(ob)
             actions.append(action)
@@ -108,7 +113,7 @@ def rollout(env, agent, max_pathlength, n_timesteps):
             if res[2]:
                 terminated = True
                 break
-
+        agent.save_frames = False
         path = {"obs": np.concatenate(np.expand_dims(obs, 0)),
                 "action_dists": np.concatenate(action_dists),
                 "rewards": np.array(rewards),
@@ -304,6 +309,7 @@ class VF(object):
                 featmat = np.concatenate([self._features_rgb(path) for path in paths])
             else:
                 featmat = np.concatenate([self._features(path) for path in paths])
+      
         ret = self.session.run(self.test_net, {self.x: featmat})
         ret = np.reshape(ret, (ret.shape[0], ))
         return ret

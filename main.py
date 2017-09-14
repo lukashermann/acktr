@@ -16,7 +16,7 @@ import argparse
 import kfac
 import shutil
 import pickle
-#test2
+import datetime
 
 parser = argparse.ArgumentParser(description="Run commands")
 # GENERAL HYPERPARAMETERS
@@ -81,7 +81,7 @@ class AsyncNGAgent(object):
     def __init__(self, env, args):
         self.env = env
         self.config = config = args
-        self.config.max_pathlength = env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
+        self.config.max_pathlength = 150 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
         utils.weight_decay_conv = self.config.weight_decay_conv
@@ -90,6 +90,13 @@ class AsyncNGAgent(object):
         if self.config.use_adam:
             self.config.kl_desired = 0.002
             self.lr = 1e-4
+        env_description_str = self.config.env_id
+        if self.config.use_pixels:
+            env_description_str += "_pixel"
+        else:
+            env_description_str += "state_space"
+        self.config.log_dir = os.path.join("logs/",env_description_str,
+        datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
         # print all the flags
         print '##################'
@@ -100,7 +107,7 @@ class AsyncNGAgent(object):
             hyperparams_txt = hyperparams_txt + "{} {}\n".format(key, value)
         if os.path.exists(self.config.log_dir):
             shutil.rmtree(self.config.log_dir)
-        os.mkdir(self.config.log_dir)
+        os.makedirs(self.config.log_dir)
         txt_file = open(os.path.join(self.config.log_dir, "hyperparams.txt"), "w")
         txt_file.write(hyperparams_txt)
         txt_file.close()
@@ -108,9 +115,12 @@ class AsyncNGAgent(object):
         print '##################'
         print("Observation Space", env.observation_space)
         print("Action Space", env.action_space)
-        config_tf = tf.ConfigProto()
+        config_tf = tf.ConfigProto(intra_op_parallelism_threads=1)
         config_tf.gpu_options.allow_growth=True # don't take full gpu memory
         self.session = tf.Session(config=config_tf)
+        """from tensorflow.python import debug as tf_debug
+        self.session = tf_debug.LocalCLIDebugWrapperSession(self.session)
+        self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
         self.train = True
         self.solved = False
         self.obs_shape = obs_shape = list(env.observation_space.shape)
@@ -137,6 +147,12 @@ class AsyncNGAgent(object):
 
         # Create summary writer
         self.summary_writer = tf.summary.FileWriter(self.config.log_dir)
+
+        self.animate = True
+        if self.animate:
+            self.img_save_path = self.config.log_dir + "/imgs/"
+            os.mkdir(self.img_save_path)
+        self.save_frames = False
 
     def init_policy_train_op(self, loss_policy, loss_policy_sampled, wd_dict):
           if self.config.use_adam:
@@ -289,7 +305,19 @@ class AsyncNGAgent(object):
 
         bestepisoderewards = float("-inf")
 
+        #fw2 = tf.summary.FileWriter(os.path.join(self.config.log_dir,"graph"), self.session.graph)
+        """from tensorflow.python import debug as tf_debug
+        self.session = tf_debug.LocalCLIDebugWrapperSession(self.session)
+        self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
+
         while total_timesteps < self.config.max_timesteps:
+            # save frames
+            self.save_frames = False
+            self.iteration = i
+            if (i % 100 == 0) and self.animate:
+                print("true")
+                os.mkdir(self.img_save_path + "iter_" + str(i) )
+                self.save_frames = True
             # Generating paths.
             print("Rollout")
             t1_rollout = time.time()
@@ -338,7 +366,7 @@ class AsyncNGAgent(object):
             # Computing baseline function for next iter.
 
             advant_n /= (advant_n.std() + 1e-8)
-
+            
             feed = {self.obs: obs_n,
                     self.action: action_n,
                 self.advant: advant_n,
@@ -348,7 +376,7 @@ class AsyncNGAgent(object):
                 [path["rewards"].sum() for path in paths])
 
             print "\n********** Iteration %i ************" % i
-            if episoderewards.mean() >= self.env.spec.reward_threshold:
+            if episoderewards.mean() >= self.env._spec.reward_threshold:
                 print "Solved Env"
                 self.solved = True
 

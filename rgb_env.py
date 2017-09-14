@@ -5,7 +5,7 @@ from gym import Env
 import cv2
 
 class RGBEnv(Env):
-    def __init__(self, env, is_rgb=True):
+    def __init__(self, env, is_rgb=False):
         self._env = env
         self.is_rgb = is_rgb
         if self.is_rgb:
@@ -44,9 +44,27 @@ class RGBEnv(Env):
             frame = np.reshape(frame, [42, 42, 3]) # 42, 42, 3
         return frame
 
+    # Taken from universe-starter-agent
+    def _process_frame42_2(self, frame):
+        #frame = frame[20:,10:190]
+        # Resize by half, then down to 42x42 (essentially mipmapping). If
+        # we resize directly we lose pixels that, when mapped to 42x42,
+        # aren't close enough to the pixel boundary.
+        frame = cv2.resize(frame, (80, 80)) # 80, 80
+        frame = cv2.resize(frame, (42, 42)) # 42, 42
+        if self.is_rgb is False:
+            frame = frame.mean(2)
+        frame = frame.astype(np.float32)
+        frame *= (1.0 / 255.0)
+        if self.is_rgb is False:
+            frame = np.reshape(frame, [42, 42, 1]) # 42, 42, 1
+        else:
+            frame = np.reshape(frame, [42, 42, 3]) # 42, 42, 3
+        return frame
+
     def reset(self, **kwargs):
         self._env.reset(**kwargs)
-        frame = self._process_frame42(self._env.render('rgb_array'))
+        frame = self._process_frame42_2(self._env.render('rgb_array'))
         return frame
 
     def step(self, action):
@@ -61,7 +79,7 @@ class RGBEnv(Env):
 
         wrapped_step = self._env.step(scaled_action)
         _, reward, done, info = wrapped_step
-        next_frame = self._process_frame42(self._env.render('rgb_array'))
+        next_frame = self._process_frame42_2(self._env.render('rgb_array'))
 
         return next_frame, reward, done, info
 

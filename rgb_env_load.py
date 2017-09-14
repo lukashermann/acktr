@@ -12,8 +12,8 @@ class RGBEnv(Env):
             self._observation_space = Box(low=0.0, high=1.0, shape=(42, 42, 3)) # 42, 42, 3
         else:
             self._observation_space = Box(low=0.0, high=1.0, shape=(42, 42, 1)) # 42, 42, 1
-        self.spec = self._env.spec
-        self.spec.reward_threshold = self.spec.reward_threshold or float('inf')
+        self._spec = self._env.spec
+        self._spec.reward_threshold = self._spec.reward_threshold or float('inf')
 
     @property
     def action_space(self):
@@ -44,10 +44,28 @@ class RGBEnv(Env):
             frame = np.reshape(frame, [42, 42, 3]) # 42, 42, 3
         return frame
 
+    def _process_frame42_2(self, frame):
+        frame = frame[20:,10:190]
+        # Resize by half, then down to 42x42 (essentially mipmapping). If
+        # we resize directly we lose pixels that, when mapped to 42x42,
+        # aren't close enough to the pixel boundary.
+        frame = cv2.resize(frame, (80, 80)) # 80, 80
+        frame = cv2.resize(frame, (42, 42)) # 42, 42
+        if self.is_rgb is False:
+            frame = frame.mean(2)
+        frame = frame.astype(np.float32)
+        frame *= (1.0 / 255.0)
+        if self.is_rgb is False:
+            frame = np.reshape(frame, [42, 42, 1]) # 42, 42, 1
+        else:
+            frame = np.reshape(frame, [42, 42, 3]) # 42, 42, 3
+        return frame
+
+
     def reset(self, **kwargs):
         self._env.reset(**kwargs)
         frame_raw = self._env.render('rgb_array')
-        frame = self._process_frame42(frame_raw)
+        frame = self._process_frame42_2(frame_raw)
         return frame_raw, frame
 
     def step(self, action):
@@ -63,7 +81,7 @@ class RGBEnv(Env):
         wrapped_step = self._env.step(scaled_action)
         _, reward, done, info = wrapped_step
         next_frame_raw = self._env.render('rgb_array')
-        next_frame = self._process_frame42(next_frame_raw)
+        next_frame = self._process_frame42_2(next_frame_raw)
 
         return next_frame_raw, next_frame, reward, done, info
 
