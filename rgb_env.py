@@ -5,7 +5,7 @@ from gym import Env
 import cv2
 
 class RGBEnv(Env):
-    def __init__(self, env, is_rgb=False):
+    def __init__(self, env, is_rgb=True):
         self._env = env
         self.is_rgb = is_rgb
         if self.is_rgb:

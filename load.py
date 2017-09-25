@@ -31,7 +31,7 @@ parser.add_argument('-l', '--lam', default=0.97, type=float,
                     help="Lambda value to reduce variance see GAE")
 parser.add_argument('-s', '--seed', default=1, type=int,
                     help="Seed")
-parser.add_argument('--log-dir', default="./test_logs", type=str,
+parser.add_argument('--log-dir', default="./test_logs/reacher_pixel", type=str,
                     help="Folder to save")
 # NEURAL NETWORK ARCHITECTURE
 parser.add_argument('--weight-decay-fc', default=3e-4, type=float, help="weight decay for fc layer")
@@ -101,6 +101,7 @@ class AsyncNGAgent(object):
         for key,value in vars(self.config).iteritems():
             print key, value
             hyperparams_txt = hyperparams_txt + "{} {}\n".format(key, value)
+        #self.config.log_dir = self.config.save_dir
         if os.path.exists(self.config.log_dir):
             shutil.rmtree(self.config.log_dir)
         os.mkdir(self.config.log_dir)
@@ -217,7 +218,9 @@ class AsyncNGAgent(object):
             obs_new = np.concatenate([obs, self.prev_obs, self.prev_action], 1)
 
         action_dist_n = self.session.run(self.action_dist_n, {self.obs: obs_new})
-
+        intermediate_obs = []
+        for x in self.intermediate_obs_op:
+            intermediate_obs.append(self.session.run(x, {self.obs: obs_new}))
         if self.config.deterministic:
             action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
         else:
@@ -225,7 +228,7 @@ class AsyncNGAgent(object):
 
         self.prev_action = np.expand_dims(np.copy(action),0)
         self.prev_obs = obs
-        return action, action_dist_n, np.squeeze(obs_new)
+        return action, action_dist_n, np.squeeze(obs_new), intermediate_obs
 
     def learn(self):
         config = self.config
@@ -249,17 +252,25 @@ class AsyncNGAgent(object):
 
         policy_vars = []
         # recreate policy net
-        for var in tf.global_variables():
+        for j,var in enumerate(tf.global_variables()):
             if var.name.startswith("policy"):
                 policy_vars.append(var)
                 print (var.name)
                 print (self.session.run(var, feed_dict={}).shape)
+                """mat = var.eval(session=self.session)
+                with open(os.path.join(self.config.log_dir, "w" + str(j) + ".npz"), "w") as outfile:
+                    np.save(outfile, mat)"""
+
 
 
         if self.config.use_pixels:
-            self.action_dist_n = load_policy_net_rgb(self.obs, policy_vars, env.action_space.shape[0])
+            self.action_dist_n, self.intermediate_obs_op = load_policy_net_rgb(self.obs, policy_vars, env.action_space.shape[0])
         else:
             self.action_dist_n = load_policy_net(self.obs, policy_vars, [64,64], [True, True], self.env.action_space.shape[0])
+
+        """with tf.variable_scope('policy/l0', reuse=True) as scope_conv:
+            W_conv1 = tf.get_variable('weights', shape=[3, 3, 2, 32])
+            weights = W_conv1.eval()"""
 
         while total_timesteps < self.config.max_timesteps:
             # Generating paths.

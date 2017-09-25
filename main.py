@@ -94,7 +94,7 @@ class AsyncNGAgent(object):
         if self.config.use_pixels:
             env_description_str += "_pixel"
         else:
-            env_description_str += "state_space"
+            env_description_str += "_state_space"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -366,7 +366,7 @@ class AsyncNGAgent(object):
             # Computing baseline function for next iter.
 
             advant_n /= (advant_n.std() + 1e-8)
-            
+
             feed = {self.obs: obs_n,
                     self.action: action_n,
                 self.advant: advant_n,

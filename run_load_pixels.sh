@@ -1,1 +1,0 @@
-CUDA_VISIBLE_DEVICES=1 python load.py --env-id Reacher-v1 --load-model True --use-pixels True --load-dir logs/openai-2017-09-06-16-04-39 --deterministic True --save True --save-dir ./test_logs/reacher

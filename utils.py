@@ -25,8 +25,11 @@ def save_ob(ob, folder, timesteps_sofar):
     Image.fromarray((copy.deepcopy(ob) * 255.).astype(np.uint8)).save(folder + '/ob_{}.jpg'.format(timesteps_sofar))
 
 def save_obs(ob_raw, ob, folder, timesteps_sofar):
+    #print(ob.shape)
+
     Image.fromarray((copy.deepcopy(ob_raw)).astype(np.uint8)).save(folder + '/ob_raw_{}.jpg'.format(timesteps_sofar))
-    Image.fromarray((copy.deepcopy(ob) * 255.).astype(np.uint8)).save(folder + '/ob_{}.jpg'.format(timesteps_sofar))
+    #Image.fromarray((copy.deepcopy(ob) * 255.).astype(np.uint8)).save(folder + '/ob_{}.jpg'.format(timesteps_sofar))
+    cv2.imwrite(folder + '/ob_{}.jpg'.format(timesteps_sofar),ob*255)
 
 
 def remkdir(folder):
@@ -34,6 +37,14 @@ def remkdir(folder):
         shutil.rmtree(folder)
     os.mkdir(folder)
 
+def save_intermediate_observations(obs, folder, timesteps_sofar):
+    path = os.path.join(folder, 'intermediate_obs_{}'.format(timesteps_sofar))
+    os.mkdir(path)
+    for j,int_ob in enumerate(obs):
+        for i in range(int_ob.shape[3]):
+            img = int_ob[0,:,:,i]*255
+            img = cv2.resize(img, (200,200), interpolation=cv2.INTER_NEAREST)
+            cv2.imwrite(path + '/intermediate_ob_{}_{}_{}.jpg'.format(timesteps_sofar,j,i),img)
 # Sample only 1 episode
 def load_rollout(env, agent, max_pathlength, n_timesteps, save=False, save_dir="./dummy/"):
     paths = []
@@ -55,7 +66,7 @@ def load_rollout(env, agent, max_pathlength, n_timesteps, save=False, save_dir="
     terminated = False
 
     for _ in xrange(max_pathlength):
-        action, action_dist, ob = agent.act(ob)
+        action, action_dist, ob, intermediate_obs = agent.act(ob)
         obs.append(ob)
         actions.append(action)
         action_dists.append(action_dist)
@@ -69,7 +80,8 @@ def load_rollout(env, agent, max_pathlength, n_timesteps, save=False, save_dir="
         if save and agent.config.use_pixels:
             folder = os.path.join(save_dir, "episode_{}".format(agent.iter))
             save_obs(ob_raw, ob, folder, timesteps_sofar)
-
+            # save intermediate_obs
+            save_intermediate_observations(intermediate_obs, folder, timesteps_sofar)
         if res[3]:
             terminated = True
             break
@@ -309,7 +321,7 @@ class VF(object):
                 featmat = np.concatenate([self._features_rgb(path) for path in paths])
             else:
                 featmat = np.concatenate([self._features(path) for path in paths])
-      
+
         ret = self.session.run(self.test_net, {self.x: featmat})
         ret = np.reshape(ret, (ret.shape[0], ))
         return ret
@@ -443,10 +455,11 @@ def create_policy_net_rgb(obs, action_size):
 
 def load_policy_net_rgb(obs, policy_vars, action_size):
     x = obs
-
+    intermediate_obs = []
     # Conv Layers
     for i in range(2):
         x = tf.nn.relu(conv2d_loaded(x, policy_vars[2*i], policy_vars[2*i+1], 32, [3,3], [2,2]))
+        intermediate_obs.append(x)
     i+=1
     x = flatten(x)
     x = tf.nn.bias_add(tf.matmul(x, policy_vars[2*i]), policy_vars[2*i+1])
@@ -459,7 +472,7 @@ def load_policy_net_rgb(obs, policy_vars, action_size):
     std = tf.tile(tf.exp(log_std_expand), [tf.shape(mean)[0], 1])
     output = tf.concat(1, [tf.reshape(mean, [-1, action_size]), tf.reshape(std, [-1, action_size])])
 
-    return output
+    return output, intermediate_obs
 
 def load_policy_net(obs, policy_vars, hidden_sizes, nonlinear, action_size):
     x = obs
