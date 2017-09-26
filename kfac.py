@@ -318,7 +318,6 @@ class KfacOptimizer():
 
                         Oh = int(bpropFactor.get_shape()[1])
                         Ow = int(bpropFactor.get_shape()[2])
-
                         if Oh == 1 and Ow == 1 and self._channel_fac:
                                 # factorization along the channels
                                 # assume independence among input channels

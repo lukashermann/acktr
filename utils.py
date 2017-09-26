@@ -201,11 +201,11 @@ class VF(object):
     def conv_net(self, x, weight_loss_dict=None, reuse=None):
 
         # Conv Layers
-        x = tf.nn.relu(conv2d(x, 32, "vf/l0", [8, 8], [4, 4],pad="VALID", \
+        x = tf.nn.elu(conv2d(x, 32, "vf/l0", [8, 8], [4, 4],pad="VALID", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
-        x = tf.nn.relu(conv2d(x, 64, "vf/l1", [4, 4], [2, 2],pad="VALID", \
+        x = tf.nn.elu(conv2d(x, 32, "vf/l1", [4, 4], [2, 2],pad="VALID", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
-        x = tf.nn.relu(conv2d(x, 32, "vf/l2", [3, 3], [1, 1],pad="VALID", \
+        x = tf.nn.elu(conv2d(x, 32, "vf/l2", [3, 3], [1, 1],pad="VALID", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
 
         x = flatten(x)
@@ -477,7 +477,7 @@ def create_policy_net_rgb(obs, action_size):
 
     x = tf.nn.relu(conv2d(x, 32, "policy/l0", [8, 8], [4, 4],pad="VALID", \
         initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
-    x = tf.nn.relu(conv2d(x, 64, "policy/l1", [4, 4], [2, 2],pad="VALID", \
+    x = tf.nn.relu(conv2d(x, 32, "policy/l1", [4, 4], [2, 2],pad="VALID", \
         initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
     x = tf.nn.relu(conv2d(x, 32, "policy/l2", [3, 3], [1, 1],pad="VALID", \
         initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
@@ -485,7 +485,7 @@ def create_policy_net_rgb(obs, action_size):
 
     x = flatten(x)
     # One more linear layer
-    x = linear(x, 512, "policy/l3", \
+    x = linear(x, 256, "policy/l3", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
     x = tf.nn.relu(x)
 

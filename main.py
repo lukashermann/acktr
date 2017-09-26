@@ -5,6 +5,7 @@ from filters import ZFilter, IdentityFilter, ClipFilter
 from normalized_env import NormalizedEnv # used only for rescaling actions
 from rgb_env import RGBEnv
 from jaco_pixel_env import JacoPixelEnv
+from jaco_depth_env import JacoDepthEnv
 import numpy as np
 import random
 import tensorflow as tf
@@ -228,7 +229,6 @@ class AsyncNGAgent(object):
             obs_new = np.concatenate([obs, self.prev_obs], -1)
         else:
             obs_new = np.concatenate([obs, self.prev_obs, self.prev_action], 1)
-
 
         action_dist_n = self.session.run(self.action_dist_n, {self.obs: obs_new})
 
@@ -476,7 +476,7 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
     if args.use_pixels:
-        env = JacoPixelEnv(env)
+        env = JacoDepthEnv(env)
     else:
         env = NormalizedEnv(env)
     agent = AsyncNGAgent(env, args)
