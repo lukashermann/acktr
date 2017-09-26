@@ -4,6 +4,7 @@ import utils
 from filters import ZFilter, IdentityFilter, ClipFilter
 from normalized_env import NormalizedEnv # used only for rescaling actions
 from rgb_env import RGBEnv
+from jaco_pixel_env import JacoPixelEnv
 import numpy as np
 import random
 import tensorflow as tf
@@ -366,7 +367,7 @@ class AsyncNGAgent(object):
             # Computing baseline function for next iter.
 
             advant_n /= (advant_n.std() + 1e-8)
-            
+
             feed = {self.obs: obs_n,
                     self.action: action_n,
                 self.advant: advant_n,
@@ -475,7 +476,7 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
     if args.use_pixels:
-        env = RGBEnv(env)
+        env = JacoPixelEnv(env)
     else:
         env = NormalizedEnv(env)
     agent = AsyncNGAgent(env, args)

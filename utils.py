@@ -179,7 +179,7 @@ class VF(object):
         net = tf.reshape(net, (-1, ))
         return net, weight_loss_dict
 
-    def conv_net(self, x, weight_loss_dict=None, reuse=None):
+    def conv_net42(self, x, weight_loss_dict=None, reuse=None):
 
         # Conv Layers
         for i in range(2):
@@ -197,6 +197,29 @@ class VF(object):
         x = tf.reshape(x, (-1, ))
 
         return x, weight_loss_dict
+
+    def conv_net(self, x, weight_loss_dict=None, reuse=None):
+
+        # Conv Layers
+        x = tf.nn.relu(conv2d(x, 32, "vf/l0", [8, 8], [4, 4],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x = tf.nn.relu(conv2d(x, 64, "vf/l1", [4, 4], [2, 2],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x = tf.nn.relu(conv2d(x, 32, "vf/l2", [3, 3], [1, 1],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+
+        x = flatten(x)
+        # One more linear layer
+        x = linear(x, 512, "vf/l3", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.nn.elu(x)
+
+        x = linear(x, 1, "vf/value", \
+            initializer=ortho_init(1), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.reshape(x, (-1, ))
+
+        return x, weight_loss_dict
+
 
     def create_net(self, shape):
         self.x = tf.placeholder(tf.float32, shape=[None] + list(shape), name="x")
@@ -309,7 +332,7 @@ class VF(object):
                 featmat = np.concatenate([self._features_rgb(path) for path in paths])
             else:
                 featmat = np.concatenate([self._features(path) for path in paths])
-      
+
         ret = self.session.run(self.test_net, {self.x: featmat})
         ret = np.reshape(ret, (ret.shape[0], ))
         return ret
@@ -418,7 +441,7 @@ def flatten(x):
     return tf.reshape(x, [-1, np.prod(x.get_shape().as_list()[1:])])
 
 # universe-starter-agent 42x42 net
-def create_policy_net_rgb(obs, action_size):
+def create_policy_net_rgb42(obs, action_size):
     x = obs
     weight_loss_dict = {}
 
@@ -430,6 +453,39 @@ def create_policy_net_rgb(obs, action_size):
     x = flatten(x)
     # One more linear layer
     x = linear(x, 256, "policy/l{}".format(i+1), \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
+    x = tf.nn.relu(x)
+
+    mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
+    log_std = tf.Variable(tf.zeros([action_size]), name="policy/log_std")
+    log_std_expand = tf.expand_dims(log_std, 0)
+    std = tf.tile(tf.exp(log_std_expand), [tf.shape(mean)[0], 1])
+    output = tf.concat(1, [tf.reshape(mean, [-1, action_size]), tf.reshape(std, [-1, action_size])])
+
+    return output, weight_loss_dict
+
+# universe-starter-agent 84x84 net
+def create_policy_net_rgb(obs, action_size):
+    x = obs
+    weight_loss_dict = {}
+
+    # Conv Layers
+    """for i in range(2):
+        x = tf.nn.relu(conv2d(x, 32, "policy/l{}".format(i), [3, 3], [2, 2], \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    """
+
+    x = tf.nn.relu(conv2d(x, 32, "policy/l0", [8, 8], [4, 4],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    x = tf.nn.relu(conv2d(x, 64, "policy/l1", [4, 4], [2, 2],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    x = tf.nn.relu(conv2d(x, 32, "policy/l2", [3, 3], [1, 1],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+
+
+    x = flatten(x)
+    # One more linear layer
+    x = linear(x, 512, "policy/l3", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
     x = tf.nn.relu(x)
 

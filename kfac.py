@@ -9,7 +9,8 @@ KFAC_DEBUG = False
 
 class KfacOptimizer():
 
-    def __init__(self, learning_rate=0.01, momentum=0.9, clip_kl=0.01, upper_bound_kl=False, kfac_update=20, stats_accum_iter=60, full_stats_init=False, cold_iter=100, cold_lr=None, async=False, async_stats=False, epsilon=1e-2, stats_decay=0.95, blockdiag_bias=False, channel_fac=False, factored_damping=False, approxT2=False, use_float64=False, weight_decay_dict={}):
+    def __init__(self, learning_rate=0.01, momentum=0.9, clip_kl=0.01, upper_bound_kl=False, kfac_update=20, stats_accum_iter=60, full_stats_init=False, cold_iter=100, cold_lr=None, async=False, async_stats=False, epsilon=1e-2, stats_decay=0.95, blockdiag_bias=False, channel_fac=False, factored_damping=False, approxT2=False, use_float64=False, weight_decay_dict={}, max_grad_norm=1.0):
+        self.max_grad_norm = max_grad_norm
         self._lr = learning_rate
         self._momentum = momentum
         self._clip_kl = clip_kl
@@ -885,13 +886,40 @@ class KfacOptimizer():
 
         return tf.group(*updateOps), qr
 
-    def apply_gradients(self, grads):
+    def apply_gradients_org(self, grads):
         coldOptim = tf.train.MomentumOptimizer(
             self._cold_lr * (1. - self._momentum), self._momentum)
 
         def coldSGDstart():
             sgd_step_op = tf.assign_add(self.sgd_step, 1)
             coldOptim_op = coldOptim.apply_gradients(grads)
+            if KFAC_DEBUG:
+                with tf.control_dependencies([sgd_step_op, coldOptim_op]):
+                    sgd_step_op = tf.Print(
+                        sgd_step_op, [self.sgd_step, tf.convert_to_tensor('doing cold sgd step')])
+            return tf.group(*[sgd_step_op, coldOptim_op])
+
+        kfacOptim_op, qr = self.apply_gradients_kfac(grads)
+
+        def warmKFACstart():
+            return kfacOptim_op
+
+        return tf.cond(tf.greater(self.sgd_step, self._cold_iter), warmKFACstart, coldSGDstart), qr
+
+    def apply_gradients(self, grads):
+        coldOptim = tf.train.MomentumOptimizer(
+            self._cold_lr * (1. - self._momentum), self._momentum)
+
+        def coldSGDstart():
+            sgd_grads, sgd_var = zip(*grads)
+
+            if self.max_grad_norm != None:
+                sgd_grads, sgd_grad_norm = tf.clip_by_global_norm(sgd_grads,self.max_grad_norm)
+
+            sgd_grads = list(zip(sgd_grads,sgd_var))
+
+            sgd_step_op = tf.assign_add(self.sgd_step, 1)
+            coldOptim_op = coldOptim.apply_gradients(sgd_grads)
             if KFAC_DEBUG:
                 with tf.control_dependencies([sgd_step_op, coldOptim_op]):
                     sgd_step_op = tf.Print(
