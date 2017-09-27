@@ -5,13 +5,17 @@ from gym import Env
 import cv2
 
 class JacoDepthEnv(Env):
-    def __init__(self, env, is_rgb=False):
+    def __init__(self, env, is_rgb=False, is_depth=True):
         self._env = env
         self.is_rgb = is_rgb
+        self.is_depth = is_depth
+        self.width = 42
+        self.num_channels = 1
         if self.is_rgb:
-            self._observation_space = Box(low=0.0, high=1.0, shape=(84, 84, 4)) # 42, 42, 3
-        else:
-            self._observation_space = Box(low=0.0, high=1.0, shape=(84, 84, 2)) # 42, 42, 1
+            self.num_channels = 3
+        if self.is_depth:
+            self.num_channels += 1
+        self._observation_space = Box(low=0.0, high=1.0, shape=(self.width, self.width, self.num_channels))
         self._spec = self._env.spec
         self._spec.reward_threshold = self._spec.reward_threshold or float('inf')
 
@@ -78,16 +82,12 @@ class JacoDepthEnv(Env):
             frame = np.zeros((height, width,2))
             frame[:,:,0] = rgb
             frame[:,:,1] = depth
-        if self.is_rgb is False:
-            frame = np.reshape(frame, [84, 84, 2]) # 42, 42, 1
-        else:
-            frame = np.reshape(frame, [84, 84, 4]) # 42, 42, 3
         return frame
 
     def reset(self, **kwargs):
         ob = self._env.reset(**kwargs)
         #frame = self._process_frame84(self._env.render('rgb_array'))
-        frame = self.preprocessMujocoRgbd(ob, 84, 84)
+        frame = self.preprocessMujocoRgbd(ob, self.width, self.width)
         return frame
 
     def step(self, action):
@@ -102,7 +102,7 @@ class JacoDepthEnv(Env):
 
         wrapped_step = self._env.step(scaled_action)
         ob, reward, done, info = wrapped_step
-        next_frame = self.preprocessMujocoRgbd(ob, 84, 84)
+        next_frame = self.preprocessMujocoRgbd(ob, self.width, self.width)
 
         return next_frame, reward, done, info
 

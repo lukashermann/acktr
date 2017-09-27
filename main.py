@@ -77,6 +77,10 @@ parser.add_argument('--load-model', default=False, type=bool,
                     help="Load trained model")
 parser.add_argument('--load-dir', default="/tmp/cont_control/unknown", type=str,
                     help="Folder to load from")
+parser.add_argument('--is-rgb', default=True, type=bool,
+                    help="Use RGB")
+parser.add_argument('--is-depth', default=False, type=bool,
+                    help="Use Depth Image")
 
 class AsyncNGAgent(object):
 
@@ -189,7 +193,7 @@ class AsyncNGAgent(object):
     def init_policy(self):
         # Create neural network
         if self.config.use_pixels:
-            action_dist_n, self.policy_weight_decay_dict = create_policy_net_rgb(self.obs, env.action_space.shape[0])
+            action_dist_n, self.policy_weight_decay_dict = create_policy_net_rgb42(self.obs, env.action_space.shape[0])
         else:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net(self.obs, [64,64], [True, True], env.action_space.shape[0])
 
@@ -476,7 +480,7 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
     if args.use_pixels:
-        env = JacoDepthEnv(env)
+        env = JacoDepthEnv(env, is_rgb=args.is_rgb, is_depth=args.is_depth)
     else:
         env = NormalizedEnv(env)
     agent = AsyncNGAgent(env, args)
