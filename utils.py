@@ -90,10 +90,11 @@ def rollout(env, agent, max_pathlength, n_timesteps):
     paths = []
     timesteps_sofar = 0
     while timesteps_sofar < n_timesteps:
-        obs, actions, rewards, rewards_filtered, action_dists = [], [], [], [], []
-        ob = env.reset()
+        obs_pix, obs_ss, actions, rewards, rewards_filtered, action_dists = [], [], [], [], [], []
+        ob_pix, ob_ss = env.reset()
         agent.prev_action *= 0.0
-        agent.prev_obs *= 0.0
+        agent.prev_obs_pix *= 0.0
+        agent.prev_obs_ss *= 0.0
         terminated = False
 
         for j in xrange(max_pathlength):
@@ -101,20 +102,23 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                 frame = env.render(mode="rgb_array")
 
                 cv2.imwrite(agent.img_save_path + "iter_"+str(agent.iteration)+"/img_" + str(j) + ".png", frame)
-            action, action_dist, ob = agent.act(ob)
-            obs.append(ob)
+            action, action_dist, ob_pix, ob_ss = agent.act(ob_pix, ob_ss)
+            obs_pix.append(ob_pix)
+            obs_ss.append(ob_ss)
             actions.append(action)
             action_dists.append(action_dist)
             res = env.step(action)
             reward_filtered = agent.reward_filter(np.asarray([res[1]]))[0]
-            ob = res[0]
+            ob_pix = res[0]
+            ob_ss = res[4]
             rewards.append(res[1])
             rewards_filtered.append(reward_filtered)
             if res[2]:
                 terminated = True
                 break
         agent.save_frames = False
-        path = {"obs": np.concatenate(np.expand_dims(obs, 0)),
+        path = {"obs_pix": np.concatenate(np.expand_dims(obs_pix, 0)),
+                "obs_ss": np.concatenate(np.expand_dims(obs_ss, 0)),
                 "action_dists": np.concatenate(action_dists),
                 "rewards": np.array(rewards),
                 "rewards_filtered": np.array(rewards_filtered),
@@ -122,7 +126,8 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                 "terminated": terminated,}
         paths.append(path)
         agent.prev_action *= 0.0
-        agent.prev_obs *= 0.0
+        agent.prev_obs_pix *= 0.0
+        agent.prev_obs_ss *= 0.0
         timesteps_sofar += len(path["rewards"])
     return paths, timesteps_sofar
 
@@ -161,12 +166,10 @@ class VF(object):
         self.averager = tf.train.ExponentialMovingAverage(decay=self.config.moving_average_vf)
 
     def init_vf(self,paths):
-        if self.config.use_pixels:
-            featmat = np.concatenate([self._features_rgb(path) for path in paths])
-            return self.create_net(featmat.shape[1:])
-        else:
-            featmat = np.concatenate([self._features(path) for path in paths])
-            return self.create_net([featmat.shape[1]])
+        featmat_pix = np.concatenate([self._features_rgb(path) for path in paths])
+
+        featmat_ss = np.concatenate([self._features(path) for path in paths])
+        return self.create_net(featmat.shape[1:],[featmat.shape[1]])
 
     def fc_net(self, x, weight_loss_dict=None, reuse=None):
         net = x
@@ -197,6 +200,9 @@ class VF(object):
         x = tf.reshape(x, (-1, ))
 
         return x, weight_loss_dict
+
+    def conv_net_combi(self, x_pix, x_ss, weight_loss_dict=None, reuse=None):
+        
 
     def conv_net84(self, x, weight_loss_dict=None, reuse=None):
 
@@ -243,15 +249,14 @@ class VF(object):
         return x, weight_loss_dict
 
 
-    def create_net(self, shape):
-        self.x = tf.placeholder(tf.float32, shape=[None] + list(shape), name="x")
+    def create_net(self, shape_pix, shape_ss):
+        self.x_pix = tf.placeholder(tf.float32, shape=[None] + list(shape_pix), name="x_pix")
+        self.x_ss = tf.placeholder(tf.float32, shape=[None] + list(shape_ss), name="x_ss")
+
         self.y = tf.placeholder(tf.float32, shape=[None], name="y")
         self.vf_weight_loss_dict = {}
         with tf.name_scope('train_vf'):
-            if self.config.use_pixels:
-                self.net, self.vf_weight_loss_dict = self.conv_net42(self.x, self.vf_weight_loss_dict)
-            else:
-                self.net, self.vf_weight_loss_dict = self.fc_net(self.x, self.vf_weight_loss_dict)
+            self.net, self.vf_weight_loss_dict = self.conv_net_combi(self.x_pix, self.x_ss, self.vf_weight_loss_dict)
 
         self.bellman_error = (self.net - self.y)
         l2 = tf.reduce_mean(self.bellman_error * self.bellman_error)
@@ -270,10 +275,7 @@ class VF(object):
 
         # build test net with exponential moving averages for inference
         with tf.name_scope('test_vf'):
-            if self.config.use_pixels:
-                self.test_net, _ = self.conv_net42(self.x, None, reuse=True)
-            else:
-                self.test_net, _ = self.fc_net(self.x, None, reuse=True)
+            self.test_net, _ = self.conv_net_combi(self.x_pix, self.x_ss, None, reuse=True)
 
         if self.config.use_adam_vf:
             self.loss_fisher = None
@@ -315,7 +317,7 @@ class VF(object):
         return self.train, self.queue_runner
 
     def _features(self, path):
-        o = path["obs"].astype('float32')
+        o = path["obs_ss"].astype('float32')
         o = o.reshape(o.shape[0], -1)
         act = path["action_dists"].astype('float32')
         l = len(path["rewards"])
@@ -324,7 +326,7 @@ class VF(object):
         return ret
 
     def _features_rgb(self, path):
-        o = path["obs"].astype('float32')
+        o = path["obs_pix"].astype('float32')
         return o
 
     def get_feed_dict(self, paths):

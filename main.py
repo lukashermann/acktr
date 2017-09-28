@@ -119,7 +119,8 @@ class AsyncNGAgent(object):
         txt_file.close()
         print (self.config.log_dir)
         print '##################'
-        print("Observation Space", env.observation_space)
+        print("Observation Space Pixel", env.observation_space_pix)
+        print("Observation Space State Space", env.observation_space_ss)
         print("Action Space", env.action_space)
         config_tf = tf.ConfigProto(intra_op_parallelism_threads=1)
         config_tf.gpu_options.allow_growth=True # don't take full gpu memory
@@ -129,27 +130,26 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
         self.train = True
         self.solved = False
-        self.obs_shape = obs_shape = list(env.observation_space.shape)
-        self.prev_obs = np.zeros([1] + list(obs_shape))
+        self.obs_pix_shape = obs_pix_shape = list(env.observation_space_pix.shape)
+        self.obs_ss_shape = obs_ss_shape = list(env.observation_space_ss.shape)
+        self.prev_obs_pix = np.zeros([1] + list(obs_pix_shape))
+        self.prev_obs_ss = np.zeros([1] + list(obs_ss_shape))
         self.prev_action = np.zeros((1, env.action_space.shape[0]))
-        obs_shape[-1] *= 2 # include previous frame in a state
-        if self.config.use_pixels:
-            self.obs = obs = tf.placeholder(
-                dtype, shape=[None] + obs_shape, name="obs")
-        else:
-            self.obs = obs = tf.placeholder(
-                dtype, shape=[None, 2*env.observation_space.shape[0] + env.action_space.shape[0]], name="obs")
+        obs_pix_shape[-1] *= 2 # include previous frame in a state
+        obs_ss_shape[-1] *= 2 # include previous frame in a state
+        self.obs_pix = obs_pix = tf.placeholder(
+                dtype, shape=[None] + obs_pix_shape, name="obs_pix")
+        self.obs_ss = obs_ss = tf.placeholder(
+                dtype, shape=[None, 2*env.observation_space_ss.shape[0] + env.action_space.shape[0]], name="obs_ss")
 
         self.action = action = tf.placeholder(dtype, shape=[None, env.action_space.shape[0]], name="action")
         self.advant = advant = tf.placeholder(dtype, shape=[None], name="advant")
         self.oldaction_dist = oldaction_dist = tf.placeholder(dtype, shape=[None, env.action_space.shape[0]*2], name="oldaction_dist")
 
-        if self.config.use_pixels:
-            self.ob_filter = IdentityFilter()
-            self.reward_filter = ZFilter((1,), demean=False, clip=10)
-        else:
-            self.ob_filter = ZFilter((env.observation_space.shape[0],), clip=5)
-            self.reward_filter = ZFilter((1,), demean=False, clip=10)
+
+        self.ob_pix_filter = IdentityFilter()
+        self.reward_filter = ZFilter((1,), demean=False, clip=10)
+        self.ob_ss_filter = ZFilter((env.observation_space_ss.shape[0],), clip=5)
 
         # Create summary writer
         self.summary_writer = tf.summary.FileWriter(self.config.log_dir)
@@ -192,11 +192,13 @@ class AsyncNGAgent(object):
     # Function that creates computational graph for actor
     def init_policy(self):
         # Create neural network
+        """
         if self.config.use_pixels:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net_rgb42(self.obs, env.action_space.shape[0])
         else:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net(self.obs, [64,64], [True, True], env.action_space.shape[0])
-
+        """
+        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi(self.obs_pix, self.obs_ss, env.action_space.shape[0])
         # get weight decay losses for actor
         policy_losses = tf.get_collection('policy_losses', None)
         eps = 1e-6
@@ -223,18 +225,17 @@ class AsyncNGAgent(object):
 
         return self.total_policy_loss, self.surr_fisher, self.policy_weight_decay_dict
 
-    def act(self, obs, *args):
-        if self.config.use_pixels == False:
-            obs = self.ob_filter(obs, update=self.train)
-        else:
-            obs = self.ob_filter(obs)
-        obs = np.expand_dims(obs, 0)
+    def act(self, obs_pix, obs_ss, *args):
+        obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
+        obs_pix = self.ob_filter(obs_pix)
+        obs_ss = np.expand_dims(obs_ss, 0)
+        obs_pix = np.expand_dims(obs_pix, 0)
         if self.config.use_pixels:
-            obs_new = np.concatenate([obs, self.prev_obs], -1)
+            obs_pix_new = np.concatenate([obs_pix, self.prev_obs_pix], -1)
         else:
-            obs_new = np.concatenate([obs, self.prev_obs, self.prev_action], 1)
+            obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
 
-        action_dist_n = self.session.run(self.action_dist_n, {self.obs: obs_new})
+        action_dist_n = self.session.run(self.action_dist_n, {self.obs_pix: obs_pix_new,self.obs_ss: obs_ss_new})
 
         """
         if self.train:
@@ -245,8 +246,9 @@ class AsyncNGAgent(object):
         action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
 
         self.prev_action = np.expand_dims(np.copy(action),0)
-        self.prev_obs = obs
-        return action, action_dist_n, np.squeeze(obs_new)
+        self.prev_obs_pix = obs_pix
+        self.prev_obs_ss = obs_ss
+        return action, action_dist_n, np.squeeze(obs_pix_new), np.squeeze(obs_ss_new)
 
     def learn(self):
         config = self.config
@@ -289,10 +291,9 @@ class AsyncNGAgent(object):
             self.saver = tf.train.import_meta_graph('{}/model.ckpt.meta'.format(config.load_dir))
             self.saver.restore(self.session, \
                 tf.train.latest_checkpoint("{}".format(config.load_dir)))
-            if config.use_pixels == False:
-                ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
-                with open(ob_filter_path, 'rb') as ob_filter_input:
-                    self.ob_filter = pickle.load(ob_filter_input)
+            ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
+            with open(ob_filter_path, 'rb') as ob_filter_input:
+                self.ob_filter = pickle.load(ob_filter_input)
 
             print ("Loaded Model")
             sys.exit()
@@ -359,7 +360,8 @@ class AsyncNGAgent(object):
 
             # Updating policy.
             action_dist_n = np.concatenate([path["action_dists"] for path in paths])
-            obs_n = np.concatenate([path["obs"] for path in paths])
+            obs_pix_n = np.concatenate([path["obs_pix"] for path in paths])
+            obs_ss_n = np.concatenate([path["obs_ss"] for path in paths])
             action_n = np.concatenate([path["actions"] for path in paths])
             baseline_n = np.concatenate([path["baseline"] for path in paths])
             returns_n = np.concatenate([path["returns"] for path in paths])
@@ -372,9 +374,10 @@ class AsyncNGAgent(object):
 
             advant_n /= (advant_n.std() + 1e-8)
 
-            feed = {self.obs: obs_n,
+            feed = {self.obs_pix: obs_pix_n,
+                    self.obs_ss: obs_ss_n,
                     self.action: action_n,
-                self.advant: advant_n,
+                    self.advant: advant_n,
                     self.oldaction_dist: action_dist_n}
 
             episoderewards = np.array(
@@ -390,10 +393,9 @@ class AsyncNGAgent(object):
                 bestepisoderewards = episoderewards.mean()
                 model_path = os.path.join(config.log_dir, "model.ckpt")
                 self.saver.save(self.session, model_path)
-                if config.use_pixels == False:
-                    ob_filter_path = os.path.join(config.log_dir, "ob_filter.pkl")
-                    with open(ob_filter_path, 'wb') as ob_filter_output:
-                        pickle.dump(self.ob_filter, ob_filter_output, pickle.HIGHEST_PROTOCOL)
+                ob_filter_path = os.path.join(config.log_dir, "ob_filter.pkl")
+                with open(ob_filter_path, 'wb') as ob_filter_output:
+                    pickle.dump(self.ob_ss_filter, ob_filter_output, pickle.HIGHEST_PROTOCOL)
                 print "Model saved to {}".format(model_path)
 
             if self.train:
