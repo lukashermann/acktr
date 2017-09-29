@@ -5,7 +5,7 @@ from gym import Env
 import cv2
 
 class JacoCombiEnv(Env):
-    def __init__(self, env, is_rgb=False, is_depth=True):
+    def __init__(self, env, is_rgb=False, is_depth=False):
         self._env = env
         self.is_rgb = is_rgb
         self.is_depth = is_depth
@@ -79,14 +79,12 @@ class JacoCombiEnv(Env):
     def preprocessMujocoRgbd(self,ob, height, width):
         rgb = self.preprocessRgb(ob[0], height, width)
         depth = self.preprocessDepth(ob[1], height, width)
-        if self.is_rgb:
-            frame = np.zeros((height, width,4))
-            frame[:,:,:3] = rgb
-            frame[:,:,3] = depth
+        frame = np.zeros((height, width,self.num_channels))
+        if self.is_depth:
+            frame[:,:,:-1] = rgb
+            frame[:,:,-1] = depth
         else:
-            frame = np.zeros((height, width,2))
-            frame[:,:,0] = rgb
-            frame[:,:,1] = depth
+            frame = rgb
         return frame
 
     def reset(self, **kwargs):

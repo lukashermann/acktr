@@ -6,6 +6,7 @@ from normalized_env import NormalizedEnv # used only for rescaling actions
 from rgb_env import RGBEnv
 from jaco_pixel_env import JacoPixelEnv
 from jaco_depth_env import JacoDepthEnv
+from jaco_combi_env import JacoCombiEnv
 import numpy as np
 import random
 import tensorflow as tf
@@ -97,10 +98,7 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        if self.config.use_pixels:
-            env_description_str += "_pixel"
-        else:
-            env_description_str += "state_space"
+        env_description_str += "_combi"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -198,12 +196,12 @@ class AsyncNGAgent(object):
         else:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net(self.obs, [64,64], [True, True], env.action_space.shape[0])
         """
-        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi(self.obs_pix, self.obs_ss, env.action_space.shape[0])
+        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi(self.obs_pix, self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
         # get weight decay losses for actor
         policy_losses = tf.get_collection('policy_losses', None)
         eps = 1e-6
         self.action_dist_n = action_dist_n
-        N = tf.shape(self.obs)[0]
+        N = tf.shape(self.obs_pix)[0]
         Nf = tf.cast(N, dtype)
 
         logp_n = loglik(self.action, action_dist_n, env.action_space.shape[0])
@@ -227,13 +225,11 @@ class AsyncNGAgent(object):
 
     def act(self, obs_pix, obs_ss, *args):
         obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
-        obs_pix = self.ob_filter(obs_pix)
+        obs_pix = self.ob_pix_filter(obs_pix)
         obs_ss = np.expand_dims(obs_ss, 0)
         obs_pix = np.expand_dims(obs_pix, 0)
-        if self.config.use_pixels:
-            obs_pix_new = np.concatenate([obs_pix, self.prev_obs_pix], -1)
-        else:
-            obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
+        obs_pix_new = np.concatenate([obs_pix, self.prev_obs_pix], -1)
+        obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
 
         action_dist_n = self.session.run(self.action_dist_n, {self.obs_pix: obs_pix_new,self.obs_ss: obs_ss_new})
 
@@ -482,7 +478,7 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
     if args.use_pixels:
-        env = JacoDepthEnv(env, is_rgb=args.is_rgb, is_depth=args.is_depth)
+        env = JacoCombiEnv(env, is_rgb=args.is_rgb, is_depth=False)
     else:
         env = NormalizedEnv(env)
     agent = AsyncNGAgent(env, args)
