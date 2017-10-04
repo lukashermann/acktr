@@ -478,7 +478,7 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
     if args.use_pixels:
-        env = JacoCombiEnv(env, is_rgb=False, is_depth=True)
+        env = JacoCombiEnv(env, is_rgb=True, is_depth=True)
     else:
         env = NormalizedEnv(env)
     agent = AsyncNGAgent(env, args)

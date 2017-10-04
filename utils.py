@@ -215,12 +215,12 @@ class VF(object):
             x_ss = linear(x_ss, hidden_sizes[i], "vf/l{}".format(i+2), initializer=normalized_columns_initializer(1.0), weight_loss_dict=weight_loss_dict, reuse=reuse)
             x_ss = tf.nn.elu(x_ss)
 
-        combined = tf.concat(1,[x_pix, x_ss])
 
-        x = linear(combined, 256, "vf/l4", \
+
+        x_pix = linear(x_pix, 256, "vf/l4", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
-        x = tf.nn.elu(x)
-
+        x_pix = tf.nn.elu(x_pix)
+        x = tf.concat(1,[x_pix, x_ss])
         x = linear(x, 1, "vf/value", \
             initializer=ortho_init(1), weight_loss_dict=weight_loss_dict, reuse=reuse)
         x = tf.reshape(x, (-1, ))
@@ -587,10 +587,11 @@ def create_policy_net_combi(obs_pix, obs_ss, hidden_sizes, nonlinear, action_siz
         if nonlinear[i]:
             x_ss = tf.nn.tanh(x_ss)
 
-    x = tf.concat(1,[x_pix, x_ss])
-    x = linear(x, 256, "policy/l4", \
+
+    x_pix = linear(x_pix, 256, "policy/l4", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
-    x = tf.nn.relu(x)
+    x_pix = tf.nn.relu(x_pix)
+    x = tf.concat(1,[x_pix, x_ss])
     mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
     log_std = tf.Variable(tf.zeros([action_size]), name="policy/log_std")
     log_std_expand = tf.expand_dims(log_std, 0)
