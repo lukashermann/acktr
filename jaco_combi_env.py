@@ -63,6 +63,8 @@ class JacoCombiEnv(Env):
             img = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)[:,:,0]
         img = img.astype(np.float32)
         img*= (1. / 255.)
+        if self.is_rgb is False:
+            img = np.reshape(img, [height, width, 1])
         #cv2.imshow("rgb", img)
         #cv2.waitKey(1)
         return img
