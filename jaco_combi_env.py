@@ -9,7 +9,7 @@ class JacoCombiEnv(Env):
         self._env = env
         self.is_rgb = is_rgb
         self.is_depth = is_depth
-        self.width = 42
+        self.width = 45
         self.num_channels = 1
         if self.is_rgb:
             self.num_channels = 3
