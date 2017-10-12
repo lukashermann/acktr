@@ -196,7 +196,7 @@ class AsyncNGAgent(object):
         else:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net(self.obs, [64,64], [True, True], env.action_space.shape[0])
         """
-        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi(self.obs_pix, self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
+        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi42(self.obs_pix, self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
         # get weight decay losses for actor
         policy_losses = tf.get_collection('policy_losses', None)
         eps = 1e-6

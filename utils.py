@@ -213,7 +213,33 @@ class VF(object):
 
         return x, weight_loss_dict
 
-    def conv_net_combi(self, x_pix, x_ss, weight_loss_dict=None, reuse=None):
+    def conv_net_combi42(self, x_pix, x_ss, weight_loss_dict=None, reuse=None):
+        # Conv Layers
+        for i in range(2):
+            x_pix = tf.nn.elu(conv2d(x_pix, 32, "vf/l{}".format(i), [3, 3], [2, 2], \
+                initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+
+        x_pix = flatten(x_pix)
+
+        # Linear Layers
+        hidden_sizes = [64,64]
+        for i in range(len(hidden_sizes)):
+            x_ss = linear(x_ss, hidden_sizes[i], "vf/l{}".format(i+2), initializer=normalized_columns_initializer(1.0), weight_loss_dict=weight_loss_dict, reuse=reuse)
+            x_ss = tf.nn.elu(x_ss)
+
+        combined = tf.concat(1,[x_pix, x_ss])
+
+        x = linear(combined, 256, "vf/l4", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.nn.elu(x)
+
+        x = linear(x, 1, "vf/value", \
+            initializer=ortho_init(1), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.reshape(x, (-1, ))
+
+        return x, weight_loss_dict
+
+    def conv_net_combi45(self, x_pix, x_ss, weight_loss_dict=None, reuse=None):
         # Conv Layers
         for i in range(3):
             x_pix = tf.nn.elu(conv2d(x_pix, 32, "vf/l{}".format(i), [3, 3], [2, 2],pad="VALID", \
@@ -290,7 +316,7 @@ class VF(object):
         self.y = tf.placeholder(tf.float32, shape=[None], name="y")
         self.vf_weight_loss_dict = {}
         with tf.name_scope('train_vf'):
-            self.net, self.vf_weight_loss_dict = self.conv_net_combi(self.x_pix, self.x_ss, self.vf_weight_loss_dict)
+            self.net, self.vf_weight_loss_dict = self.conv_net_combi42(self.x_pix, self.x_ss, self.vf_weight_loss_dict)
 
         self.bellman_error = (self.net - self.y)
         l2 = tf.reduce_mean(self.bellman_error * self.bellman_error)
@@ -309,7 +335,7 @@ class VF(object):
 
         # build test net with exponential moving averages for inference
         with tf.name_scope('test_vf'):
-            self.test_net, _ = self.conv_net_combi(self.x_pix, self.x_ss, None, reuse=True)
+            self.test_net, _ = self.conv_net_combi42(self.x_pix, self.x_ss, None, reuse=True)
 
         if self.config.use_adam_vf:
             self.loss_fisher = None
@@ -580,7 +606,37 @@ def create_policy_net_rgb63(obs, action_size):
 
     return output, weight_loss_dict
 
-def create_policy_net_combi(obs_pix, obs_ss, hidden_sizes, nonlinear, action_size):
+def create_policy_net_combi42(obs_pix, obs_ss, hidden_sizes, nonlinear, action_size):
+    x_pix = obs_pix
+    x_ss = obs_ss
+    weight_loss_dict = {}
+
+    # Conv Layers
+    for i in range(2):
+        x_pix = tf.nn.relu(conv2d(x_pix, 32, "policy/l{}".format(i), [3, 3], [2, 2], \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+
+    x_pix = flatten(x_pix)
+
+    #  Linear Layers
+    for i in range(len(hidden_sizes)):
+        x_ss = linear(x_ss, hidden_sizes[i], "policy/l{}".format(i+2), initializer=normalized_columns_initializer(1.0), weight_loss_dict=weight_loss_dict)
+        if nonlinear[i]:
+            x_ss = tf.nn.tanh(x_ss)
+
+    x = tf.concat(1,[x_pix, x_ss])
+    x = linear(x, 256, "policy/l4", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
+    x = tf.nn.relu(x)
+    mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
+    log_std = tf.Variable(tf.zeros([action_size]), name="policy/log_std")
+    log_std_expand = tf.expand_dims(log_std, 0)
+    std = tf.tile(tf.exp(log_std_expand), [tf.shape(mean)[0], 1])
+    output = tf.concat(1, [tf.reshape(mean, [-1, action_size]), tf.reshape(std, [-1, action_size])])
+
+    return output, weight_loss_dict
+
+def create_policy_net_combi45(obs_pix, obs_ss, hidden_sizes, nonlinear, action_size):
     x_pix = obs_pix
     x_ss = obs_ss
     weight_loss_dict = {}
