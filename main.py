@@ -76,7 +76,7 @@ parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
 parser.add_argument('--load-model', default=False, type=bool,
                     help="Load trained model")
-parser.add_argument('--load-dir', default="/tmp/cont_control/unknown", type=str,
+parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi/openai-2017-10-12-13-02-30", type=str,
                     help="Folder to load from")
 parser.add_argument('--is-rgb', default=True, type=bool,
                     help="Use RGB")
@@ -249,8 +249,9 @@ class AsyncNGAgent(object):
     def learn(self):
         config = self.config
         numeptotal = 0
-        i = 0
-
+        #i = 0
+        iter_count = tf.Variable(0,name='iter_count',trainable=False)
+        inc = tf.assign_add(iter_count, 1, name='increment')
         total_timesteps = 0
         benchmark_results = []
         benchmark_results.append({"env_id": config.env_id})
@@ -282,8 +283,8 @@ class AsyncNGAgent(object):
         print ("Init All vars 2")
 
         # Create saver
-        if config.load_model:
-            self.train = False
+        """if config.load_model:
+            #self.train = False
             self.saver = tf.train.import_meta_graph('{}/model.ckpt.meta'.format(config.load_dir))
             self.saver.restore(self.session, \
                 tf.train.latest_checkpoint("{}".format(config.load_dir)))
@@ -292,7 +293,17 @@ class AsyncNGAgent(object):
                 self.ob_filter = pickle.load(ob_filter_input)
 
             print ("Loaded Model")
-            sys.exit()
+            #sys.exit()"""
+        if config.load_model:
+            #self.train = False
+            self.saver = tf.train.Saver()
+            model_path = os.path.join(config.load_dir, "model.ckpt")
+            self.saver.restore(self.session, model_path)
+            ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
+            with open(ob_filter_path, 'rb') as ob_filter_input:
+                self.ob_filter = pickle.load(ob_filter_input)
+
+            print ("Loaded Model")
         else:
             self.saver = tf.train.Saver()
 
@@ -313,6 +324,7 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
 
         while total_timesteps < self.config.max_timesteps:
+            i = self.session.run(iter_count)
             # save frames
             self.save_frames = False
             self.iteration = i
@@ -467,7 +479,8 @@ class AsyncNGAgent(object):
                 for k, v in stats.iteritems():
                     print(k + ": " + " " * (40 - len(k)) + str(v))
 
-            i += 1
+            #i += 1
+            self.session.run(inc)
 
 
 if __name__ == '__main__':
