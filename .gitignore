@@ -3,3 +3,4 @@ logs/*
 *~
 test_logs/*
 MUJOCO_LOG.TXT
+.nfs*
