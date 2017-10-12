@@ -4,6 +4,9 @@ import utils
 from filters import ZFilter, IdentityFilter, ClipFilter
 from normalized_env import NormalizedEnv # used only for rescaling actions
 from rgb_env import RGBEnv
+from jaco_pixel_env import JacoPixelEnv
+from jaco_depth_env import JacoDepthEnv
+from jaco_combi_env import JacoCombiEnv
 import numpy as np
 import random
 import tensorflow as tf
@@ -73,8 +76,12 @@ parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
 parser.add_argument('--load-model', default=False, type=bool,
                     help="Load trained model")
-parser.add_argument('--load-dir', default="/tmp/cont_control/unknown", type=str,
+parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi/openai-2017-10-12-13-02-30", type=str,
                     help="Folder to load from")
+parser.add_argument('--is-rgb', default=True, type=bool,
+                    help="Use RGB")
+parser.add_argument('--is-depth', default=False, type=bool,
+                    help="Use Depth Image")
 
 class AsyncNGAgent(object):
 
@@ -91,10 +98,7 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        if self.config.use_pixels:
-            env_description_str += "_pixel"
-        else:
-            env_description_str += "_state_space"
+        env_description_str += "_combi"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -113,7 +117,8 @@ class AsyncNGAgent(object):
         txt_file.close()
         print (self.config.log_dir)
         print '##################'
-        print("Observation Space", env.observation_space)
+        print("Observation Space Pixel", env.observation_space_pix)
+        print("Observation Space State Space", env.observation_space_ss)
         print("Action Space", env.action_space)
         config_tf = tf.ConfigProto(intra_op_parallelism_threads=1)
         config_tf.gpu_options.allow_growth=True # don't take full gpu memory
@@ -123,27 +128,26 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
         self.train = True
         self.solved = False
-        self.obs_shape = obs_shape = list(env.observation_space.shape)
-        self.prev_obs = np.zeros([1] + list(obs_shape))
+        self.obs_pix_shape = obs_pix_shape = list(env.observation_space_pix.shape)
+        self.obs_ss_shape = obs_ss_shape = list(env.observation_space_ss.shape)
+        self.prev_obs_pix = np.zeros([1] + list(obs_pix_shape))
+        self.prev_obs_ss = np.zeros([1] + list(obs_ss_shape))
         self.prev_action = np.zeros((1, env.action_space.shape[0]))
-        obs_shape[-1] *= 2 # include previous frame in a state
-        if self.config.use_pixels:
-            self.obs = obs = tf.placeholder(
-                dtype, shape=[None] + obs_shape, name="obs")
-        else:
-            self.obs = obs = tf.placeholder(
-                dtype, shape=[None, 2*env.observation_space.shape[0] + env.action_space.shape[0]], name="obs")
+        obs_pix_shape[-1] *= 2 # include previous frame in a state
+        obs_ss_shape[-1] *= 2 # include previous frame in a state
+        self.obs_pix = obs_pix = tf.placeholder(
+                dtype, shape=[None] + obs_pix_shape, name="obs_pix")
+        self.obs_ss = obs_ss = tf.placeholder(
+                dtype, shape=[None, 2*env.observation_space_ss.shape[0] + env.action_space.shape[0]], name="obs_ss")
 
         self.action = action = tf.placeholder(dtype, shape=[None, env.action_space.shape[0]], name="action")
         self.advant = advant = tf.placeholder(dtype, shape=[None], name="advant")
         self.oldaction_dist = oldaction_dist = tf.placeholder(dtype, shape=[None, env.action_space.shape[0]*2], name="oldaction_dist")
 
-        if self.config.use_pixels:
-            self.ob_filter = IdentityFilter()
-            self.reward_filter = ZFilter((1,), demean=False, clip=10)
-        else:
-            self.ob_filter = ZFilter((env.observation_space.shape[0],), clip=5)
-            self.reward_filter = ZFilter((1,), demean=False, clip=10)
+
+        self.ob_pix_filter = IdentityFilter()
+        self.reward_filter = ZFilter((1,), demean=False, clip=10)
+        self.ob_ss_filter = ZFilter((env.observation_space_ss.shape[0],), clip=5)
 
         # Create summary writer
         self.summary_writer = tf.summary.FileWriter(self.config.log_dir)
@@ -186,16 +190,18 @@ class AsyncNGAgent(object):
     # Function that creates computational graph for actor
     def init_policy(self):
         # Create neural network
+        """
         if self.config.use_pixels:
-            action_dist_n, self.policy_weight_decay_dict = create_policy_net_rgb(self.obs, env.action_space.shape[0])
+            action_dist_n, self.policy_weight_decay_dict = create_policy_net_rgb42(self.obs, env.action_space.shape[0])
         else:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net(self.obs, [64,64], [True, True], env.action_space.shape[0])
-
+        """
+        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi(self.obs_pix, self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
         # get weight decay losses for actor
         policy_losses = tf.get_collection('policy_losses', None)
         eps = 1e-6
         self.action_dist_n = action_dist_n
-        N = tf.shape(self.obs)[0]
+        N = tf.shape(self.obs_pix)[0]
         Nf = tf.cast(N, dtype)
 
         logp_n = loglik(self.action, action_dist_n, env.action_space.shape[0])
@@ -217,19 +223,15 @@ class AsyncNGAgent(object):
 
         return self.total_policy_loss, self.surr_fisher, self.policy_weight_decay_dict
 
-    def act(self, obs, *args):
-        if self.config.use_pixels == False:
-            obs = self.ob_filter(obs, update=self.train)
-        else:
-            obs = self.ob_filter(obs)
-        obs = np.expand_dims(obs, 0)
-        if self.config.use_pixels:
-            obs_new = np.concatenate([obs, self.prev_obs], -1)
-        else:
-            obs_new = np.concatenate([obs, self.prev_obs, self.prev_action], 1)
+    def act(self, obs_pix, obs_ss, *args):
+        obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
+        obs_pix = self.ob_pix_filter(obs_pix)
+        obs_ss = np.expand_dims(obs_ss, 0)
+        obs_pix = np.expand_dims(obs_pix, 0)
+        obs_pix_new = np.concatenate([obs_pix, self.prev_obs_pix], -1)
+        obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
 
-
-        action_dist_n = self.session.run(self.action_dist_n, {self.obs: obs_new})
+        action_dist_n = self.session.run(self.action_dist_n, {self.obs_pix: obs_pix_new,self.obs_ss: obs_ss_new})
 
         """
         if self.train:
@@ -240,14 +242,16 @@ class AsyncNGAgent(object):
         action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
 
         self.prev_action = np.expand_dims(np.copy(action),0)
-        self.prev_obs = obs
-        return action, action_dist_n, np.squeeze(obs_new)
+        self.prev_obs_pix = obs_pix
+        self.prev_obs_ss = obs_ss
+        return action, action_dist_n, np.squeeze(obs_pix_new), np.squeeze(obs_ss_new)
 
     def learn(self):
         config = self.config
         numeptotal = 0
-        i = 0
-
+        #i = 0
+        iter_count = tf.Variable(0,name='iter_count',trainable=False)
+        inc = tf.assign_add(iter_count, 1, name='increment')
         total_timesteps = 0
         benchmark_results = []
         benchmark_results.append({"env_id": config.env_id})
@@ -279,18 +283,27 @@ class AsyncNGAgent(object):
         print ("Init All vars 2")
 
         # Create saver
-        if config.load_model:
-            self.train = False
+        """if config.load_model:
+            #self.train = False
             self.saver = tf.train.import_meta_graph('{}/model.ckpt.meta'.format(config.load_dir))
             self.saver.restore(self.session, \
                 tf.train.latest_checkpoint("{}".format(config.load_dir)))
-            if config.use_pixels == False:
-                ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
-                with open(ob_filter_path, 'rb') as ob_filter_input:
-                    self.ob_filter = pickle.load(ob_filter_input)
+            ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
+            with open(ob_filter_path, 'rb') as ob_filter_input:
+                self.ob_filter = pickle.load(ob_filter_input)
 
             print ("Loaded Model")
-            sys.exit()
+            #sys.exit()"""
+        if config.load_model:
+            #self.train = False
+            self.saver = tf.train.Saver()
+            model_path = os.path.join(config.load_dir, "model.ckpt")
+            self.saver.restore(self.session, model_path)
+            ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
+            with open(ob_filter_path, 'rb') as ob_filter_input:
+                self.ob_filter = pickle.load(ob_filter_input)
+
+            print ("Loaded Model")
         else:
             self.saver = tf.train.Saver()
 
@@ -311,6 +324,7 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
 
         while total_timesteps < self.config.max_timesteps:
+            i = self.session.run(iter_count)
             # save frames
             self.save_frames = False
             self.iteration = i
@@ -354,7 +368,8 @@ class AsyncNGAgent(object):
 
             # Updating policy.
             action_dist_n = np.concatenate([path["action_dists"] for path in paths])
-            obs_n = np.concatenate([path["obs"] for path in paths])
+            obs_pix_n = np.concatenate([path["obs_pix"] for path in paths])
+            obs_ss_n = np.concatenate([path["obs_ss"] for path in paths])
             action_n = np.concatenate([path["actions"] for path in paths])
             baseline_n = np.concatenate([path["baseline"] for path in paths])
             returns_n = np.concatenate([path["returns"] for path in paths])
@@ -367,9 +382,10 @@ class AsyncNGAgent(object):
 
             advant_n /= (advant_n.std() + 1e-8)
 
-            feed = {self.obs: obs_n,
+            feed = {self.obs_pix: obs_pix_n,
+                    self.obs_ss: obs_ss_n,
                     self.action: action_n,
-                self.advant: advant_n,
+                    self.advant: advant_n,
                     self.oldaction_dist: action_dist_n}
 
             episoderewards = np.array(
@@ -385,10 +401,9 @@ class AsyncNGAgent(object):
                 bestepisoderewards = episoderewards.mean()
                 model_path = os.path.join(config.log_dir, "model.ckpt")
                 self.saver.save(self.session, model_path)
-                if config.use_pixels == False:
-                    ob_filter_path = os.path.join(config.log_dir, "ob_filter.pkl")
-                    with open(ob_filter_path, 'wb') as ob_filter_output:
-                        pickle.dump(self.ob_filter, ob_filter_output, pickle.HIGHEST_PROTOCOL)
+                ob_filter_path = os.path.join(config.log_dir, "ob_filter.pkl")
+                with open(ob_filter_path, 'wb') as ob_filter_output:
+                    pickle.dump(self.ob_ss_filter, ob_filter_output, pickle.HIGHEST_PROTOCOL)
                 print "Model saved to {}".format(model_path)
 
             if self.train:
@@ -464,7 +479,8 @@ class AsyncNGAgent(object):
                 for k, v in stats.iteritems():
                     print(k + ": " + " " * (40 - len(k)) + str(v))
 
-            i += 1
+            #i += 1
+            self.session.run(inc)
 
 
 if __name__ == '__main__':
@@ -475,7 +491,7 @@ if __name__ == '__main__':
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
     if args.use_pixels:
-        env = RGBEnv(env)
+        env = JacoCombiEnv(env, is_rgb=True, is_depth=True)
     else:
         env = NormalizedEnv(env)
     agent = AsyncNGAgent(env, args)

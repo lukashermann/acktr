@@ -102,10 +102,11 @@ def rollout(env, agent, max_pathlength, n_timesteps):
     paths = []
     timesteps_sofar = 0
     while timesteps_sofar < n_timesteps:
-        obs, actions, rewards, rewards_filtered, action_dists = [], [], [], [], []
-        ob = env.reset()
+        obs_pix, obs_ss, actions, rewards, rewards_filtered, action_dists = [], [], [], [], [], []
+        ob_pix, ob_ss = env.reset()
         agent.prev_action *= 0.0
-        agent.prev_obs *= 0.0
+        agent.prev_obs_pix *= 0.0
+        agent.prev_obs_ss *= 0.0
         terminated = False
 
         for j in xrange(max_pathlength):
@@ -113,20 +114,23 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                 frame = env.render(mode="rgb_array")
 
                 cv2.imwrite(agent.img_save_path + "iter_"+str(agent.iteration)+"/img_" + str(j) + ".png", frame)
-            action, action_dist, ob = agent.act(ob)
-            obs.append(ob)
+            action, action_dist, ob_pix, ob_ss = agent.act(ob_pix, ob_ss)
+            obs_pix.append(ob_pix)
+            obs_ss.append(ob_ss)
             actions.append(action)
             action_dists.append(action_dist)
             res = env.step(action)
             reward_filtered = agent.reward_filter(np.asarray([res[1]]))[0]
-            ob = res[0]
+            ob_pix = res[0]
+            ob_ss = res[4]
             rewards.append(res[1])
             rewards_filtered.append(reward_filtered)
             if res[2]:
                 terminated = True
                 break
         agent.save_frames = False
-        path = {"obs": np.concatenate(np.expand_dims(obs, 0)),
+        path = {"obs_pix": np.concatenate(np.expand_dims(obs_pix, 0)),
+                "obs_ss": np.concatenate(np.expand_dims(obs_ss, 0)),
                 "action_dists": np.concatenate(action_dists),
                 "rewards": np.array(rewards),
                 "rewards_filtered": np.array(rewards_filtered),
@@ -134,7 +138,8 @@ def rollout(env, agent, max_pathlength, n_timesteps):
                 "terminated": terminated,}
         paths.append(path)
         agent.prev_action *= 0.0
-        agent.prev_obs *= 0.0
+        agent.prev_obs_pix *= 0.0
+        agent.prev_obs_ss *= 0.0
         timesteps_sofar += len(path["rewards"])
     return paths, timesteps_sofar
 
@@ -173,12 +178,10 @@ class VF(object):
         self.averager = tf.train.ExponentialMovingAverage(decay=self.config.moving_average_vf)
 
     def init_vf(self,paths):
-        if self.config.use_pixels:
-            featmat = np.concatenate([self._features_rgb(path) for path in paths])
-            return self.create_net(featmat.shape[1:])
-        else:
-            featmat = np.concatenate([self._features(path) for path in paths])
-            return self.create_net([featmat.shape[1]])
+        featmat_pix = np.concatenate([self._features_rgb(path) for path in paths])
+
+        featmat_ss = np.concatenate([self._features(path) for path in paths])
+        return self.create_net(featmat_pix.shape[1:],[featmat_ss.shape[1]])
 
     def fc_net(self, x, weight_loss_dict=None, reuse=None):
         net = x
@@ -191,7 +194,7 @@ class VF(object):
         net = tf.reshape(net, (-1, ))
         return net, weight_loss_dict
 
-    def conv_net(self, x, weight_loss_dict=None, reuse=None):
+    def conv_net42(self, x, weight_loss_dict=None, reuse=None):
 
         # Conv Layers
         for i in range(2):
@@ -210,15 +213,84 @@ class VF(object):
 
         return x, weight_loss_dict
 
-    def create_net(self, shape):
-        self.x = tf.placeholder(tf.float32, shape=[None] + list(shape), name="x")
+    def conv_net_combi(self, x_pix, x_ss, weight_loss_dict=None, reuse=None):
+        # Conv Layers
+        for i in range(3):
+            x_pix = tf.nn.elu(conv2d(x_pix, 32, "vf/l{}".format(i), [3, 3], [2, 2],pad="VALID", \
+                initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x_pix = flatten(x_pix)
+
+        # Linear Layers
+        hidden_sizes = [64,64]
+        for i in range(len(hidden_sizes)):
+            x_ss = linear(x_ss, hidden_sizes[i], "vf/l{}".format(i+3), initializer=normalized_columns_initializer(1.0), weight_loss_dict=weight_loss_dict, reuse=reuse)
+            x_ss = tf.nn.elu(x_ss)
+
+        x = tf.concat(1,[x_pix, x_ss])
+
+        x = linear(x, 256, "vf/l5", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.nn.elu(x)
+
+        x = linear(x, 1, "vf/value", \
+            initializer=ortho_init(1), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.reshape(x, (-1, ))
+
+        return x, weight_loss_dict
+
+    def conv_net84(self, x, weight_loss_dict=None, reuse=None):
+
+        # Conv Layers
+        x = tf.nn.elu(conv2d(x, 32, "vf/l0", [8, 8], [4, 4],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x = tf.nn.elu(conv2d(x, 32, "vf/l1", [4, 4], [2, 2],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x = tf.nn.elu(conv2d(x, 32, "vf/l2", [3, 3], [1, 1],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+
+        x = flatten(x)
+        # One more linear layer
+        x = linear(x, 512, "vf/l3", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.nn.elu(x)
+
+        x = linear(x, 1, "vf/value", \
+            initializer=ortho_init(1), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.reshape(x, (-1, ))
+
+        return x, weight_loss_dict
+
+    def conv_net63(self, x, weight_loss_dict=None, reuse=None):
+
+        # Conv Layers
+        x = tf.nn.elu(conv2d(x, 32, "vf/l0", [3, 3], [2, 2],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x = tf.nn.elu(conv2d(x, 32, "vf/l1", [3, 3], [2, 2],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+        x = tf.nn.elu(conv2d(x, 32, "vf/l2", [3, 3], [2, 2],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse))
+
+        x = flatten(x)
+        # One more linear layer
+        x = linear(x, 256, "vf/l3", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.nn.elu(x)
+
+        x = linear(x, 1, "vf/value", \
+            initializer=ortho_init(1), weight_loss_dict=weight_loss_dict, reuse=reuse)
+        x = tf.reshape(x, (-1, ))
+
+        return x, weight_loss_dict
+
+
+    def create_net(self, shape_pix, shape_ss):
+        self.x_pix = tf.placeholder(tf.float32, shape=[None] + list(shape_pix), name="x_pix")
+        self.x_ss = tf.placeholder(tf.float32, shape=[None] + list(shape_ss), name="x_ss")
+
         self.y = tf.placeholder(tf.float32, shape=[None], name="y")
         self.vf_weight_loss_dict = {}
         with tf.name_scope('train_vf'):
-            if self.config.use_pixels:
-                self.net, self.vf_weight_loss_dict = self.conv_net(self.x, self.vf_weight_loss_dict)
-            else:
-                self.net, self.vf_weight_loss_dict = self.fc_net(self.x, self.vf_weight_loss_dict)
+            self.net, self.vf_weight_loss_dict = self.conv_net_combi(self.x_pix, self.x_ss, self.vf_weight_loss_dict)
 
         self.bellman_error = (self.net - self.y)
         l2 = tf.reduce_mean(self.bellman_error * self.bellman_error)
@@ -237,10 +309,7 @@ class VF(object):
 
         # build test net with exponential moving averages for inference
         with tf.name_scope('test_vf'):
-            if self.config.use_pixels:
-                self.test_net, _ = self.conv_net(self.x, None, reuse=True)
-            else:
-                self.test_net, _ = self.fc_net(self.x, None, reuse=True)
+            self.test_net, _ = self.conv_net_combi(self.x_pix, self.x_ss, None, reuse=True)
 
         if self.config.use_adam_vf:
             self.loss_fisher = None
@@ -282,7 +351,7 @@ class VF(object):
         return self.train, self.queue_runner
 
     def _features(self, path):
-        o = path["obs"].astype('float32')
+        o = path["obs_ss"].astype('float32')
         o = o.reshape(o.shape[0], -1)
         act = path["action_dists"].astype('float32')
         l = len(path["rewards"])
@@ -291,49 +360,41 @@ class VF(object):
         return ret
 
     def _features_rgb(self, path):
-        o = path["obs"].astype('float32')
+        o = path["obs_pix"].astype('float32')
         return o
 
     def get_feed_dict(self, paths):
-        if self.config.use_pixels:
-            featmat = np.concatenate([self._features_rgb(path) for path in paths])
-        else:
-            featmat = np.concatenate([self._features(path) for path in paths])
+        featmat_pix = np.concatenate([self._features_rgb(path) for path in paths])
+        featmat_ss = np.concatenate([self._features(path) for path in paths])
         returns = np.concatenate([path["returns"] for path in paths])
-        return {self.x: featmat, self.y: returns}
+        return {self.x_pix: featmat_pix,self.x_ss: featmat_ss, self.y: returns}
 
     def fit(self, paths):
-        if self.config.use_pixels:
-            featmat = np.concatenate([self._features_rgb(path) for path in paths])
-        else:
-            featmat = np.concatenate([self._features(path) for path in paths])
+        featmat_pix = np.concatenate([self._features_rgb(path) for path in paths])
+        featmat_ss = np.concatenate([self._features(path) for path in paths])
         if self.net is None:
-            self.create_net(featmat.shape[1:])
+            self.create_net(featmat_pix.shape[1:],featmat_ss.shape[1:])
         returns = np.concatenate([path["returns"] for path in paths])
 
-        self.session.run(self.train, {self.x: featmat, self.y: returns})
+        self.session.run(self.train, {self.x_pix: featmat_pix,self.x_ss: featmat_ss, self.y: returns})
 
     def predict_many(self, paths):
         if self.net is None:
             return np.zeros(len(path["rewards"]))
         else:
-            if self.config.use_pixels:
-                featmat = np.concatenate([self._features_rgb(path) for path in paths])
-            else:
-                featmat = np.concatenate([self._features(path) for path in paths])
+            featmat_pix = np.concatenate([self._features_rgb(path) for path in paths])
+            featmat_ss = np.concatenate([self._features(path) for path in paths])
 
-        ret = self.session.run(self.test_net, {self.x: featmat})
+        ret = self.session.run(self.test_net, {self.x_pix: featmat_pix,self.x_ss: featmat_ss})
         ret = np.reshape(ret, (ret.shape[0], ))
         return ret
 
     def predict(self, path):
+
         if self.net is None:
             return np.zeros(len(path["rewards"]))
         else:
-            if self.config.use_pixels:
-                ret = self.session.run(self.test_net, {self.x: self._features_rgb(path)})
-            else:
-                ret = self.session.run(self.test_net, {self.x: self._features(path)})
+            ret = self.session.run(self.test_net, {self.x_pix: self._features_rgb(path),self.x_ss: self._features(path)})
             ret = np.reshape(ret, (ret.shape[0], ))
             return ret
 
@@ -430,7 +491,7 @@ def flatten(x):
     return tf.reshape(x, [-1, np.prod(x.get_shape().as_list()[1:])])
 
 # universe-starter-agent 42x42 net
-def create_policy_net_rgb(obs, action_size):
+def create_policy_net_rgb42(obs, action_size):
     x = obs
     weight_loss_dict = {}
 
@@ -442,6 +503,104 @@ def create_policy_net_rgb(obs, action_size):
     x = flatten(x)
     # One more linear layer
     x = linear(x, 256, "policy/l{}".format(i+1), \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
+    x = tf.nn.relu(x)
+
+    mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
+    log_std = tf.Variable(tf.zeros([action_size]), name="policy/log_std")
+    log_std_expand = tf.expand_dims(log_std, 0)
+    std = tf.tile(tf.exp(log_std_expand), [tf.shape(mean)[0], 1])
+    output = tf.concat(1, [tf.reshape(mean, [-1, action_size]), tf.reshape(std, [-1, action_size])])
+
+    return output, weight_loss_dict
+
+# universe-starter-agent 84x84 net
+def create_policy_net_rgb84(obs, action_size):
+    x = obs
+    weight_loss_dict = {}
+
+    # Conv Layers
+    """for i in range(2):
+        x = tf.nn.relu(conv2d(x, 32, "policy/l{}".format(i), [3, 3], [2, 2], \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    """
+
+    x = tf.nn.relu(conv2d(x, 32, "policy/l0", [8, 8], [4, 4],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    x = tf.nn.relu(conv2d(x, 32, "policy/l1", [4, 4], [2, 2],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    x = tf.nn.relu(conv2d(x, 32, "policy/l2", [3, 3], [1, 1],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+
+
+    x = flatten(x)
+    # One more linear layer
+    x = linear(x, 256, "policy/l3", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
+    x = tf.nn.relu(x)
+
+    mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
+    log_std = tf.Variable(tf.zeros([action_size]), name="policy/log_std")
+    log_std_expand = tf.expand_dims(log_std, 0)
+    std = tf.tile(tf.exp(log_std_expand), [tf.shape(mean)[0], 1])
+    output = tf.concat(1, [tf.reshape(mean, [-1, action_size]), tf.reshape(std, [-1, action_size])])
+
+    return output, weight_loss_dict
+
+# universe-starter-agent 84x84 net
+def create_policy_net_rgb63(obs, action_size):
+    x = obs
+    weight_loss_dict = {}
+
+    # Conv Layers
+    """for i in range(2):
+        x = tf.nn.relu(conv2d(x, 32, "policy/l{}".format(i), [3, 3], [2, 2], \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    """
+
+    x = tf.nn.relu(conv2d(x, 32, "policy/l0", [3, 3], [2, 2],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    x = tf.nn.relu(conv2d(x, 32, "policy/l1", [3, 3], [2, 2],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+    x = tf.nn.relu(conv2d(x, 32, "policy/l2", [3, 3], [2, 2],pad="VALID", \
+        initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+
+
+    x = flatten(x)
+    # One more linear layer
+    x = linear(x, 256, "policy/l3", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
+    x = tf.nn.relu(x)
+
+    mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
+    log_std = tf.Variable(tf.zeros([action_size]), name="policy/log_std")
+    log_std_expand = tf.expand_dims(log_std, 0)
+    std = tf.tile(tf.exp(log_std_expand), [tf.shape(mean)[0], 1])
+    output = tf.concat(1, [tf.reshape(mean, [-1, action_size]), tf.reshape(std, [-1, action_size])])
+
+    return output, weight_loss_dict
+
+def create_policy_net_combi(obs_pix, obs_ss, hidden_sizes, nonlinear, action_size):
+    x_pix = obs_pix
+    x_ss = obs_ss
+    weight_loss_dict = {}
+
+    # Conv Layers
+    for i in range(3):
+        x_pix = tf.nn.relu(conv2d(x_pix, 32, "policy/l{}".format(i), [3, 3], [2, 2],pad="VALID", \
+            initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict))
+
+    x_pix = flatten(x_pix)
+
+    #  Linear Layers
+    for i in range(len(hidden_sizes)):
+        x_ss = linear(x_ss, hidden_sizes[i], "policy/l{}".format(i+3), initializer=normalized_columns_initializer(1.0), weight_loss_dict=weight_loss_dict)
+        if nonlinear[i]:
+            x_ss = tf.nn.tanh(x_ss)
+
+    x = tf.concat(1,[x_pix, x_ss])
+
+    x = linear(x, 256, "policy/l5", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
     x = tf.nn.relu(x)
 
