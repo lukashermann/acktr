@@ -98,7 +98,7 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        env_description_str += "_combi"
+        env_description_str += "_combi2"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
