@@ -233,7 +233,7 @@ class VF(object):
 
         combined = tf.concat(1,[x_pix, x_ss])
 
-        x = linear(combined, 128, "vf/l4", \
+        x = linear(combined, 64, "vf/l4", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict, reuse=reuse)
         x = tf.nn.elu(x)
 
@@ -634,7 +634,7 @@ def create_policy_net_combi42(obs_pix, obs_ss, hidden_sizes, nonlinear, action_s
 
 
     x = tf.concat(1,[x_pix, x_ss])
-    x = linear(x, 128, "policy/l4", \
+    x = linear(x, 64, "policy/l4", \
             initializer=ortho_init(np.sqrt(2)), weight_loss_dict=weight_loss_dict)
     x = tf.nn.tanh(x)
     mean = linear(x, action_size, "policy/mean", ortho_init(1), weight_loss_dict=weight_loss_dict)
