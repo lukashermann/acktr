@@ -74,7 +74,7 @@ parser.add_argument('--train-iter-vf', default=25, type=int,
                     help="Number of cold iterations using sgd")
 parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
-parser.add_argument('--load-model', default=True, type=bool,
+parser.add_argument('--load-model', default=False, type=bool,
                     help="Load trained model")
 parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi2/openai-2017-10-13-13-56-57", type=str,
                     help="Folder to load from")
@@ -98,7 +98,7 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        env_description_str += "_combi2"
+        env_description_str += "_combi3"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -397,7 +397,7 @@ class AsyncNGAgent(object):
                 self.solved = True
 
             # Save model if best rewards
-            if episoderewards.mean() > bestepisoderewards:
+            if episoderewards.mean() > bestepisoderewards or i%10 == 0:
                 bestepisoderewards = episoderewards.mean()
                 model_path = os.path.join(config.log_dir, "model.ckpt")
                 self.saver.save(self.session, model_path)
