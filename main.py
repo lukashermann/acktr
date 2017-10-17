@@ -397,7 +397,7 @@ class AsyncNGAgent(object):
                 self.solved = True
 
             # Save model if best rewards
-            if episoderewards.mean() > bestepisoderewards:
+            if episoderewards.mean() > bestepisoderewards or i % 10 == 0:
                 bestepisoderewards = episoderewards.mean()
                 model_path = os.path.join(config.log_dir, "model.ckpt")
                 self.saver.save(self.session, model_path)
