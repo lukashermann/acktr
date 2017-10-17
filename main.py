@@ -95,7 +95,7 @@ class AsyncNGAgent(object):
         if self.config.use_pixels:
             env_description_str += "_pixel"
         else:
-            env_description_str += "state_space"
+            env_description_str += "_state_space"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -281,17 +281,15 @@ class AsyncNGAgent(object):
 
         # Create saver
         if config.load_model:
-            self.train = False
-            self.saver = tf.train.import_meta_graph('{}/model.ckpt.meta'.format(config.load_dir))
-            self.saver.restore(self.session, \
-                tf.train.latest_checkpoint("{}".format(config.load_dir)))
-            if config.use_pixels == False:
-                ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
-                with open(ob_filter_path, 'rb') as ob_filter_input:
-                    self.ob_filter = pickle.load(ob_filter_input)
+            #self.train = False
+            self.saver = tf.train.Saver()
+            model_path = os.path.join(config.load_dir, "model.ckpt")
+            self.saver.restore(self.session, model_path)
+            ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
+            with open(ob_filter_path, 'rb') as ob_filter_input:
+                self.ob_filter = pickle.load(ob_filter_input)
 
             print ("Loaded Model")
-            sys.exit()
         else:
             self.saver = tf.train.Saver()
 
