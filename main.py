@@ -74,7 +74,7 @@ parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
 parser.add_argument('--load-model', default=False, type=bool,
                     help="Load trained model")
-parser.add_argument('--load-dir', default="/tmp/cont_control/unknown", type=str,
+parser.add_argument('--load-dir', default="/home/hermannl/git/emansim/acktr/logs/Jaco-v1_state_space/openai-2017-10-17-16-18-31", type=str,
                     help="Folder to load from")
 
 class AsyncNGAgent(object):
@@ -247,7 +247,9 @@ class AsyncNGAgent(object):
     def learn(self):
         config = self.config
         numeptotal = 0
-        i = 0
+        #i = 0
+        iter_count = tf.Variable(0,name='iter_count',trainable=False)
+        inc = tf.assign_add(iter_count, 1, name='increment')
 
         total_timesteps = 0
         benchmark_results = []
@@ -310,6 +312,7 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
 
         while total_timesteps < self.config.max_timesteps:
+            i = self.session.run(iter_count)
             # save frames
             self.save_frames = False
             self.iteration = i
@@ -463,7 +466,8 @@ class AsyncNGAgent(object):
                 for k, v in stats.iteritems():
                     print(k + ": " + " " * (40 - len(k)) + str(v))
 
-            i += 1
+            #i += 1
+            self.session.run(inc)
 
 
 if __name__ == '__main__':
