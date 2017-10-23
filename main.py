@@ -95,7 +95,7 @@ class AsyncNGAgent(object):
         if self.config.use_pixels:
             env_description_str += "_pixel"
         else:
-            env_description_str += "_state_space"
+            env_description_str += "_non_sparse"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
