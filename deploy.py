@@ -76,7 +76,7 @@ parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
 parser.add_argument('--load-model', default=True, type=bool,
                     help="Load trained model")
-parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi3/openai-2017-11-07-12-07-46", type=str,
+parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi3/openai-2017-11-07-13-41-11", type=str,
                     help="Folder to load from")
 parser.add_argument('--is-rgb', default=True, type=bool,
                     help="Use RGB")
@@ -88,7 +88,7 @@ class AsyncNGAgent(object):
     def __init__(self, env, args):
         self.env = env
         self.config = config = args
-        self.config.max_pathlength = 1000 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
+        self.config.max_pathlength = 150 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
         utils.weight_decay_conv = self.config.weight_decay_conv
@@ -196,10 +196,10 @@ class AsyncNGAgent(object):
         self.saver = tf.train.import_meta_graph('{}/model.ckpt.meta'.format(config.load_dir))
         self.saver.restore(self.session, \
             tf.train.latest_checkpoint("{}".format(config.load_dir)))
-        if config.use_pixels == False:
-            ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
-            with open(ob_filter_path, 'rb') as ob_filter_input:
-                self.ob_filter = pickle.load(ob_filter_input)
+
+        ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
+        with open(ob_filter_path, 'rb') as ob_filter_input:
+            self.ob_ss_filter = pickle.load(ob_filter_input)
 
         print ("Loaded Model")
 
