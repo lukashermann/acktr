@@ -88,7 +88,7 @@ class AsyncNGAgent(object):
     def __init__(self, env, args):
         self.env = env
         self.config = config = args
-        self.config.max_pathlength = 150 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
+        self.config.max_pathlength = 200 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
         utils.weight_decay_conv = self.config.weight_decay_conv
@@ -98,7 +98,7 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        env_description_str += "_combi2"
+        env_description_str += "_combi1"
         self.config.log_dir = os.path.join("logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -301,7 +301,7 @@ class AsyncNGAgent(object):
             self.saver.restore(self.session, model_path)
             ob_filter_path = os.path.join(config.load_dir, "ob_filter.pkl")
             with open(ob_filter_path, 'rb') as ob_filter_input:
-                self.ob_filter = pickle.load(ob_filter_input)
+                self.ob_ss_filter = pickle.load(ob_filter_input)
 
             print ("Loaded Model")
         else:

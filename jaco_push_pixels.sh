@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python main.py --env-id JacoPushPixel-v1 --kl-desired 0.002 --lr-vf 0.001 --cold-lr-vf 0.001 --seed 1 --max-timesteps 100000000 --timesteps-per-batch 12000 --use-pixels True --is-rgb True --is-depth True

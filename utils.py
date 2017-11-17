@@ -101,45 +101,46 @@ def load_rollout(env, agent, max_pathlength, n_timesteps, save=False, save_dir="
 def rollout(env, agent, max_pathlength, n_timesteps):
     paths = []
     timesteps_sofar = 0
-    obs_pix, obs_ss, actions, rewards, rewards_filtered, action_dists = [], [], [], [], [], []
-    ob_pix, ob_ss = env.reset()
-    agent.prev_action *= 0.0
-    agent.prev_obs_pix *= 0.0
-    agent.prev_obs_ss *= 0.0
-    terminated = False
+    while timesteps_sofar < n_timesteps:
+        obs_pix, obs_ss, actions, rewards, rewards_filtered, action_dists = [], [], [], [], [], []
+        ob_pix, ob_ss = env.reset()
+        agent.prev_action *= 0.0
+        agent.prev_obs_pix *= 0.0
+        agent.prev_obs_ss *= 0.0
+        terminated = False
 
-    for j in xrange(max_pathlength):
-        if agent.save_frames:
-            frame = env.render(mode="rgb_array")
+        for j in xrange(max_pathlength):
+            if agent.save_frames:
+                frame = env.render(mode="rgb_array")
 
-            cv2.imwrite(agent.img_save_path + "iter_"+str(agent.iteration)+"/img_" + str(j) + ".png", frame)
-        action, action_dist, ob_pix, ob_ss = agent.act(ob_pix, ob_ss)
-        obs_pix.append(ob_pix)
-        obs_ss.append(ob_ss)
-        actions.append(action)
-        action_dists.append(action_dist)
-        res = env.step(action)
-        reward_filtered = agent.reward_filter(np.asarray([res[1]]))[0]
-        ob_pix = res[0]
-        ob_ss = res[4]
-        rewards.append(res[1])
-        rewards_filtered.append(reward_filtered)
-        if res[2]:
-            terminated = True
-            break
-    agent.save_frames = False
-    path = {"obs_pix": np.concatenate(np.expand_dims(obs_pix, 0)),
-            "obs_ss": np.concatenate(np.expand_dims(obs_ss, 0)),
-            "action_dists": np.concatenate(action_dists),
-            "rewards": np.array(rewards),
-            "rewards_filtered": np.array(rewards_filtered),
-            "actions": np.array(actions),
-            "terminated": terminated,}
-    paths.append(path)
-    agent.prev_action *= 0.0
-    agent.prev_obs_pix *= 0.0
-    agent.prev_obs_ss *= 0.0
-    timesteps_sofar += len(path["rewards"])
+                cv2.imwrite(agent.img_save_path + "iter_"+str(agent.iteration)+"/img_" + str(j) + ".png", frame)
+            action, action_dist, ob_pix, ob_ss = agent.act(ob_pix, ob_ss)
+            obs_pix.append(ob_pix)
+            obs_ss.append(ob_ss)
+            actions.append(action)
+            action_dists.append(action_dist)
+            res = env.step(action)
+            reward_filtered = agent.reward_filter(np.asarray([res[1]]))[0]
+            ob_pix = res[0]
+            ob_ss = res[4]
+            rewards.append(res[1])
+            rewards_filtered.append(reward_filtered)
+            if res[2]:
+                terminated = True
+                break
+        agent.save_frames = False
+        path = {"obs_pix": np.concatenate(np.expand_dims(obs_pix, 0)),
+                "obs_ss": np.concatenate(np.expand_dims(obs_ss, 0)),
+                "action_dists": np.concatenate(action_dists),
+                "rewards": np.array(rewards),
+                "rewards_filtered": np.array(rewards_filtered),
+                "actions": np.array(actions),
+                "terminated": terminated,}
+        paths.append(path)
+        agent.prev_action *= 0.0
+        agent.prev_obs_pix *= 0.0
+        agent.prev_obs_ss *= 0.0
+        timesteps_sofar += len(path["rewards"])
     return paths, timesteps_sofar
 
 def normalized_columns_initializer(std=1.0):
