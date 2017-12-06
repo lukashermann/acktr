@@ -1,1 +1,0 @@
-CUDA_VISIBLE_DEVICES=1 python load.py --env-id Jaco-v1 --load-model True --use-pixels True --load-dir logs/Jaco-v1_pixel/openai-2017-09-14-16-30-49 --deterministic True --save True --save-dir ./test_logs/jaco_pixel/img

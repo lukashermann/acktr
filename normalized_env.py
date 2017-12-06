@@ -50,7 +50,7 @@ class NormalizedEnv(Env):
         return self._env.action_space
 
     @property
-    def observation_space(self):
+    def observation_space_ss(self):
         return self._env.observation_space
 
     def reset(self, **kwargs):

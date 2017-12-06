@@ -20,6 +20,8 @@ import kfac
 import shutil
 import pickle
 import datetime
+from value_function import *
+from policy import *
 
 parser = argparse.ArgumentParser(description="Run commands")
 # GENERAL HYPERPARAMETERS
@@ -82,13 +84,20 @@ parser.add_argument('--is-rgb', default=True, type=bool,
                     help="Use RGB")
 parser.add_argument('--is-depth', default=False, type=bool,
                     help="Use Depth Image")
+parser.add_argument('--max_pathlength', default=1000, type=int,
+                    help="maximum number of episode steps")
 
 class AsyncNGAgent(object):
 
     def __init__(self, env, args):
+
         self.env = env
         self.config = config = args
-        self.config.max_pathlength = 200 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
+        self.env._env.seed(self.config.seed)
+
+        self.config.max_pathlength = args.max_pathlength
+        print(self.config.max_pathlength)
+
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
         utils.weight_decay_conv = self.config.weight_decay_conv
@@ -98,9 +107,9 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        env_description_str += "_combi1"
-        self.config.log_dir = os.path.join("logs/",env_description_str,
-        datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
+        env_description_str += "/acktr"
+        self.config.log_dir = os.path.join("experiments/",env_description_str,
+        datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S") )
 
         # print all the flags
         print '##################'
@@ -117,7 +126,8 @@ class AsyncNGAgent(object):
         txt_file.close()
         print (self.config.log_dir)
         print '##################'
-        print("Observation Space Pixel", env.observation_space_pix)
+        if self.config.use_pixels:
+            print("Observation Space Pixel", env.observation_space_pix)
         print("Observation Space State Space", env.observation_space_ss)
         print("Action Space", env.action_space)
         config_tf = tf.ConfigProto(intra_op_parallelism_threads=1)
@@ -128,15 +138,16 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
         self.train = True
         self.solved = False
-        self.obs_pix_shape = obs_pix_shape = list(env.observation_space_pix.shape)
+        if self.config.use_pixels:
+            self.obs_pix_shape = obs_pix_shape = list(env.observation_space_pix.shape)
+            self.prev_obs_pix = np.zeros([1] + list(obs_pix_shape))
+            obs_pix_shape[-1] *= 2 # include previous frame in a state
+            self.obs_pix = obs_pix = tf.placeholder(dtype, shape=[None] + obs_pix_shape, name="obs_pix")
+            self.ob_pix_filter = IdentityFilter()
         self.obs_ss_shape = obs_ss_shape = list(env.observation_space_ss.shape)
-        self.prev_obs_pix = np.zeros([1] + list(obs_pix_shape))
         self.prev_obs_ss = np.zeros([1] + list(obs_ss_shape))
         self.prev_action = np.zeros((1, env.action_space.shape[0]))
-        obs_pix_shape[-1] *= 2 # include previous frame in a state
         obs_ss_shape[-1] *= 2 # include previous frame in a state
-        self.obs_pix = obs_pix = tf.placeholder(
-                dtype, shape=[None] + obs_pix_shape, name="obs_pix")
         self.obs_ss = obs_ss = tf.placeholder(
                 dtype, shape=[None, 2*env.observation_space_ss.shape[0] + env.action_space.shape[0]], name="obs_ss")
 
@@ -145,7 +156,6 @@ class AsyncNGAgent(object):
         self.oldaction_dist = oldaction_dist = tf.placeholder(dtype, shape=[None, env.action_space.shape[0]*2], name="oldaction_dist")
 
 
-        self.ob_pix_filter = IdentityFilter()
         self.reward_filter = ZFilter((1,), demean=False, clip=10)
         self.ob_ss_filter = ZFilter((env.observation_space_ss.shape[0],), clip=5)
 
@@ -196,13 +206,14 @@ class AsyncNGAgent(object):
         else:
             action_dist_n, self.policy_weight_decay_dict = create_policy_net(self.obs, [64,64], [True, True], env.action_space.shape[0])
         """
-        action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi42(self.obs_pix, self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
+        if self.config.use_pixels:
+            action_dist_n, self.policy_weight_decay_dict = create_policy_net_combi42(self.obs_pix, self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
+        else:
+            action_dist_n, self.policy_weight_decay_dict = create_policy_net_ss(self.obs_ss, [64,64], [True, True], env.action_space.shape[0])
         # get weight decay losses for actor
         policy_losses = tf.get_collection('policy_losses', None)
         eps = 1e-6
         self.action_dist_n = action_dist_n
-        N = tf.shape(self.obs_pix)[0]
-        Nf = tf.cast(N, dtype)
 
         logp_n = loglik(self.action, action_dist_n, env.action_space.shape[0])
         oldlogp_n = loglik(self.action, self.oldaction_dist, env.action_space.shape[0])
@@ -223,28 +234,34 @@ class AsyncNGAgent(object):
 
         return self.total_policy_loss, self.surr_fisher, self.policy_weight_decay_dict
 
-    def act(self, obs_pix, obs_ss, *args):
+    def act_combi(self, obs_pix, obs_ss, *args):
         obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
         obs_pix = self.ob_pix_filter(obs_pix)
         obs_ss = np.expand_dims(obs_ss, 0)
         obs_pix = np.expand_dims(obs_pix, 0)
         obs_pix_new = np.concatenate([obs_pix, self.prev_obs_pix], -1)
         obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
-
         action_dist_n = self.session.run(self.action_dist_n, {self.obs_pix: obs_pix_new,self.obs_ss: obs_ss_new})
 
-        """
-        if self.train:
-            action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
-        else:
-            action = np.float32(deterministic_sample(action_dist_n, self.env.action_space.shape[0]))
-        """
         action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
 
         self.prev_action = np.expand_dims(np.copy(action),0)
         self.prev_obs_pix = obs_pix
         self.prev_obs_ss = obs_ss
         return action, action_dist_n, np.squeeze(obs_pix_new), np.squeeze(obs_ss_new)
+
+    def act_ss(self, obs_ss, *args):
+        obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
+        obs_ss = np.expand_dims(obs_ss, 0)
+        obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
+
+        action_dist_n = self.session.run(self.action_dist_n, {self.obs_ss: obs_ss_new})
+
+        action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
+
+        self.prev_action = np.expand_dims(np.copy(action),0)
+        self.prev_obs_ss = obs_ss
+        return action, action_dist_n, np.squeeze(obs_ss_new)
 
     def learn(self):
         config = self.config
@@ -271,7 +288,10 @@ class AsyncNGAgent(object):
             config.timesteps_per_batch)
 
         ## create VF
-        self.vf = VF(self.config, self.session) # value function
+        if self.config.use_pixels:
+            self.vf = VF_combi(self.config, self.session) # value function
+        else:
+            self.vf = VF_ss(self.config, self.session) # value function
         loss_vf, loss_vf_sampled, vf_wd_dict = self.vf.init_vf(paths) # init value function
 
         # train op for policy net
@@ -368,7 +388,8 @@ class AsyncNGAgent(object):
 
             # Updating policy.
             action_dist_n = np.concatenate([path["action_dists"] for path in paths])
-            obs_pix_n = np.concatenate([path["obs_pix"] for path in paths])
+            if self.config.use_pixels:
+                obs_pix_n = np.concatenate([path["obs_pix"] for path in paths])
             obs_ss_n = np.concatenate([path["obs_ss"] for path in paths])
             action_n = np.concatenate([path["actions"] for path in paths])
             baseline_n = np.concatenate([path["baseline"] for path in paths])
@@ -382,11 +403,17 @@ class AsyncNGAgent(object):
 
             advant_n /= (advant_n.std() + 1e-8)
 
-            feed = {self.obs_pix: obs_pix_n,
-                    self.obs_ss: obs_ss_n,
-                    self.action: action_n,
-                    self.advant: advant_n,
-                    self.oldaction_dist: action_dist_n}
+            if self.config.use_pixels:
+                feed = {self.obs_pix: obs_pix_n,
+                        self.obs_ss: obs_ss_n,
+                        self.action: action_n,
+                        self.advant: advant_n,
+                        self.oldaction_dist: action_dist_n}
+            else:
+                feed = {self.obs_ss: obs_ss_n,
+                        self.action: action_n,
+                        self.advant: advant_n,
+                        self.oldaction_dist: action_dist_n}
 
             episoderewards = np.array(
                 [path["rewards"].sum() for path in paths])

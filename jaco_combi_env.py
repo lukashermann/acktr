@@ -17,7 +17,7 @@ class JacoCombiEnv(Env):
             self.num_channels += 1
         self._observation_space_pix = Box(low=0.0, high=1.0, shape=(self.width, self.width, self.num_channels))
         self._observation_space_ss = self._env.unwrapped.observation_space
-        self._spec = self._env.spec
+        self._spec = self._env.unwrapped.spec
         self._spec.reward_threshold = self._spec.reward_threshold or float('inf')
 
     @property

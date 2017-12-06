@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python main.py --env-id JacoReachPixel-v1 --kl-desired 0.002 --lr-vf 0.0001 --cold-lr-vf 0.0001 --seed 1 --max-timesteps 100000000 --max_pathlength 150 --timesteps-per-batch 150 --use-pixels True --is-rgb True --is-depth True
