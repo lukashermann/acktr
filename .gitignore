@@ -1,5 +1,6 @@
 *.pyc
 logs/*
+experiments/*
 *~
 test_logs/*
 MUJOCO_LOG.TXT
