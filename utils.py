@@ -46,57 +46,67 @@ def save_intermediate_observations(obs, folder, timesteps_sofar):
             img = cv2.resize(img, (200,200), interpolation=cv2.INTER_NEAREST)
             cv2.imwrite(path + '/intermediate_ob_{}_{}_{}.jpg'.format(timesteps_sofar,j,i),img)
 # Sample only 1 episode
-def load_rollout(env, agent, max_pathlength, n_timesteps, save=False, save_dir="./dummy/"):
+def deploy_rollout(env, agent, max_pathlength, n_timesteps):
     paths = []
     timesteps_sofar = 0
 
-    obs, actions, rewards, rewards_filtered, action_dists = [], [], [], [], []
-    ob_raw, ob = env.reset()
-    if save and agent.config.use_pixels:
-        folder = os.path.join(save_dir, "episode_{}".format(agent.iter))
-        # create folder if doesn't exists (remove if exists)
-        if agent.iter == 0:
-            remkdir(save_dir)
-        remkdir(folder)
-        save_obs(ob_raw, ob, folder, timesteps_sofar)
-
-
+    if agent.config.use_pixels:
+        obs_pix, obs_ss, actions, rewards, rewards_filtered, action_dists = [], [], [], [], [], []
+        ob_pix, ob_ss = env.reset()
+    else:
+        obs_ss, actions, rewards, rewards_filtered, action_dists = [], [], [], [], []
+        ob_ss = env.reset()
     agent.prev_action *= 0.0
-    agent.prev_obs *= 0.0
+    agent.prev_obs_ss *= 0.0
     terminated = False
 
-    for _ in xrange(max_pathlength):
-        action, action_dist, ob, intermediate_obs = agent.act(ob)
-        obs.append(ob)
+    for j in xrange(max_pathlength):
+        if agent.save_frames:
+            frame = env.render(mode="rgb_array")
+
+            cv2.imwrite(agent.img_save_path + "iter_"+str(agent.iteration)+"/img_" + str(j) + ".png", frame)
+        if agent.config.use_pixels:
+            action, action_dist, ob_pix, ob_ss = agent.act_combi(ob_pix, ob_ss)
+            obs_pix.append(ob_pix)
+        else:
+            action, action_dist, ob_ss = agent.act_ss(ob_ss)
+        obs_ss.append(ob_ss)
         actions.append(action)
         action_dists.append(action_dist)
         res = env.step(action)
-        timesteps_sofar += 1
-        reward_filtered = agent.reward_filter(np.asarray([res[2]]))[0]
-        ob_raw = res[0]
-        ob = res[1]
-        rewards.append(res[2])
+        reward_filtered = agent.reward_filter(np.asarray([res[1]]))[0]
+        if agent.config.use_pixels:
+            ob_pix = res[0]
+            ob_ss = res[4]
+        else:
+            ob_ss = res[0]
+        rewards.append(res[1])
         rewards_filtered.append(reward_filtered)
-        if save and agent.config.use_pixels:
-            folder = os.path.join(save_dir, "episode_{}".format(agent.iter))
-            save_obs(ob_raw, ob, folder, timesteps_sofar)
-            # save intermediate_obs
-            save_intermediate_observations(intermediate_obs, folder, timesteps_sofar)
-        if res[3]:
+        if res[2]:
             terminated = True
             break
-
-    path = {"obs": np.concatenate(np.expand_dims(obs, 0)),
-            "action_dists": np.concatenate(action_dists),
-            "rewards": np.array(rewards),
-            "rewards_filtered": np.array(rewards_filtered),
-            "actions": np.array(actions),
-            "terminated": terminated,}
-    paths.append(path)
+    agent.save_frames = False
+    if agent.config.use_pixels:
+        path = {"obs_pix": np.concatenate(np.expand_dims(obs_pix, 0)),
+                "obs_ss": np.concatenate(np.expand_dims(obs_ss, 0)),
+                "action_dists": np.concatenate(action_dists),
+                "rewards": np.array(rewards),
+                "rewards_filtered": np.array(rewards_filtered),
+                "actions": np.array(actions),
+                "terminated": terminated,}
+    else:
+        path = {"obs_ss": np.concatenate(np.expand_dims(obs_ss, 0)),
+                "action_dists": np.concatenate(action_dists),
+                "rewards": np.array(rewards),
+                "rewards_filtered": np.array(rewards_filtered),
+                "actions": np.array(actions),
+                "terminated": terminated,}
     agent.prev_action *= 0.0
-    agent.prev_obs *= 0.0
+    if agent.config.use_pixels:
+        agent.prev_obs_pix *= 0.0
+    agent.prev_obs_ss *= 0.0
     timesteps_sofar += len(path["rewards"])
-    return paths, timesteps_sofar
+    return path, timesteps_sofar
 
 def rollout(env, agent, max_pathlength, n_timesteps):
     paths = []

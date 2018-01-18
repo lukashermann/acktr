@@ -20,6 +20,7 @@ import kfac
 import shutil
 import pickle
 import datetime
+from policy import *
 
 parser = argparse.ArgumentParser(description="Run commands")
 # GENERAL HYPERPARAMETERS
@@ -76,19 +77,22 @@ parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
 parser.add_argument('--load-model', default=True, type=bool,
                     help="Load trained model")
-parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi3/openai-2017-11-07-13-41-11", type=str,
+parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/experiments/Env2_ss/JacoPush-v1/acktr/2018-01-10-13-37-33", type=str,
                     help="Folder to load from")
 parser.add_argument('--is-rgb', default=True, type=bool,
                     help="Use RGB")
 parser.add_argument('--is-depth', default=False, type=bool,
                     help="Use Depth Image")
+parser.add_argument('--max_pathlength', default=1000, type=int,
+                    help="maximum number of episode steps")
 
 class AsyncNGAgent(object):
 
     def __init__(self, env, args):
         self.env = env
         self.config = config = args
-        self.config.max_pathlength = 150 #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
+        self.env._env.seed(self.config.seed)
+        self.config.max_pathlength = args.max_pathlength #env._spec.tags.get('wrapper_config.TimeLimit.max_episode_steps') or 1000
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
         utils.weight_decay_conv = self.config.weight_decay_conv
@@ -98,7 +102,7 @@ class AsyncNGAgent(object):
             self.config.kl_desired = 0.002
             self.lr = 1e-4
         env_description_str = self.config.env_id
-        env_description_str += "_test1"
+        env_description_str += "/acktr_ss/seed1"
         self.config.log_dir = os.path.join("test_logs/",env_description_str,
         datetime.datetime.now().strftime("openai-%Y-%m-%d-%H-%M-%S") )
 
@@ -117,7 +121,8 @@ class AsyncNGAgent(object):
         txt_file.close()
         print (self.config.log_dir)
         print '##################'
-        print("Observation Space Pixel", env.observation_space_pix)
+        if self.config.use_pixels:
+            print("Observation Space Pixel", env.observation_space_pix)
         print("Observation Space State Space", env.observation_space_ss)
         print("Action Space", env.action_space)
         config_tf = tf.ConfigProto(intra_op_parallelism_threads=1)
@@ -128,15 +133,16 @@ class AsyncNGAgent(object):
         self.session.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)"""
         self.train = False
         self.solved = False
-        self.obs_pix_shape = obs_pix_shape = list(env.observation_space_pix.shape)
+        if self.config.use_pixels:
+            self.obs_pix_shape = obs_pix_shape = list(env.observation_space_pix.shape)
+            self.prev_obs_pix = np.zeros([1] + list(obs_pix_shape))
+            obs_pix_shape[-1] *= 2 # include previous frame in a state
+            self.obs_pix = obs_pix = tf.placeholder(dtype, shape=[None] + obs_pix_shape, name="obs_pix")
+            self.ob_pix_filter = IdentityFilter()
         self.obs_ss_shape = obs_ss_shape = list(env.observation_space_ss.shape)
-        self.prev_obs_pix = np.zeros([1] + list(obs_pix_shape))
         self.prev_obs_ss = np.zeros([1] + list(obs_ss_shape))
         self.prev_action = np.zeros((1, env.action_space.shape[0]))
-        obs_pix_shape[-1] *= 2 # include previous frame in a state
         obs_ss_shape[-1] *= 2 # include previous frame in a state
-        self.obs_pix = obs_pix = tf.placeholder(
-                dtype, shape=[None] + obs_pix_shape, name="obs_pix")
         self.obs_ss = obs_ss = tf.placeholder(
                 dtype, shape=[None, 2*env.observation_space_ss.shape[0] + env.action_space.shape[0]], name="obs_ss")
 
@@ -158,29 +164,34 @@ class AsyncNGAgent(object):
             os.mkdir(self.img_save_path)
         self.save_frames = False
 
-
-    def act(self, obs_pix, obs_ss, *args):
+    def act_combi(self, obs_pix, obs_ss, *args):
         obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
         obs_pix = self.ob_pix_filter(obs_pix)
         obs_ss = np.expand_dims(obs_ss, 0)
         obs_pix = np.expand_dims(obs_pix, 0)
         obs_pix_new = np.concatenate([obs_pix, self.prev_obs_pix], -1)
         obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
-
         action_dist_n = self.session.run(self.action_dist_n, {self.obs_pix: obs_pix_new,self.obs_ss: obs_ss_new})
 
-        """
-        if self.train:
-            action = np.float32(gaussian_sample(action_dist_n, self.env.action_space.shape[0]))
-        else:
-            action = np.float32(deterministic_sample(action_dist_n, self.env.action_space.shape[0]))
-        """
         action = np.float32(deterministic_sample(action_dist_n, self.env.action_space.shape[0]))
 
         self.prev_action = np.expand_dims(np.copy(action),0)
         self.prev_obs_pix = obs_pix
         self.prev_obs_ss = obs_ss
         return action, action_dist_n, np.squeeze(obs_pix_new), np.squeeze(obs_ss_new)
+
+    def act_ss(self, obs_ss, *args):
+        obs_ss = self.ob_ss_filter(obs_ss, update=self.train)
+        obs_ss = np.expand_dims(obs_ss, 0)
+        obs_ss_new = np.concatenate([obs_ss, self.prev_obs_ss, self.prev_action], 1)
+
+        action_dist_n = self.session.run(self.action_dist_n, {self.obs_ss: obs_ss_new})
+
+        action = np.float32(deterministic_sample(action_dist_n, self.env.action_space.shape[0]))
+
+        self.prev_action = np.expand_dims(np.copy(action),0)
+        self.prev_obs_ss = obs_ss
+        return action, action_dist_n, np.squeeze(obs_ss_new)
 
     def deploy(self):
         config = self.config
@@ -213,14 +224,16 @@ class AsyncNGAgent(object):
                 """mat = var.eval(session=self.session)
                 with open(os.path.join(self.config.log_dir, "w" + str(j) + ".npz"), "w") as outfile:
                     np.save(outfile, mat)"""
+        if self.config.use_pixels:
+            self.action_dist_n = load_policy_net_combi42(self.obs_pix, self.obs_ss, policy_vars, [64,64], [True, True], env.action_space.shape[0])
+        else:
+            self.action_dist_n = load_policy_net_ss(self.obs_ss, policy_vars, [64,64], [True, True], env.action_space.shape[0])
 
-        self.action_dist_n = load_policy_net_combi42(self.obs_pix, self.obs_ss, policy_vars, [64,64], [True, True], env.action_space.shape[0])
-
-        while total_timesteps < self.config.max_timesteps:
+        while i < 1000:
             # save frames
             self.save_frames = False
             self.iteration = i
-            if (i % 1 == 0) and self.animate:
+            if (i % 100 == 0) and self.animate:
                 print("true")
                 os.mkdir(self.img_save_path + "iter_" + str(i) )
                 self.save_frames = True
@@ -228,7 +241,7 @@ class AsyncNGAgent(object):
             # Generating paths.
             print("Rollout")
             t1_rollout = time.time()
-            paths, timesteps_sofar = rollout(
+            path, timesteps_sofar = deploy_rollout(
                 self.env,
                 self,
                 config.max_pathlength,
@@ -240,28 +253,33 @@ class AsyncNGAgent(object):
             start_time = time.time()
 
             # write results to monitor.json
-            for path in paths:
-                curr_result = {}
-                curr_result["l"] = len(path["rewards"])
-                curr_result["r"] = path["rewards"].sum()
-                benchmark_results.append(curr_result)
+
+            curr_result = {}
+            curr_result["l"] = len(path["rewards"])
+            curr_result["r"] = path["rewards"].sum()
+            benchmark_results.append(curr_result)
 
 
-            episoderewards = np.array(
-                [path["rewards"].sum() for path in paths])
 
+            episoderewards = path["rewards"].sum()
+            episode_length = len(path["rewards"])
             print "\n********** Iteration %i ************" % i
-            if episoderewards.mean() >= self.env._spec.reward_threshold:
+            if episode_length < config.max_pathlength:
                 print "Solved Env"
                 self.solved = True
 
 
             stats = {}
-            numeptotal += len(episoderewards)
-            stats["Total number of episodes"] = numeptotal
-            stats["Average sum of rewards per episode"] = episoderewards.mean()
+            stats["Episode Length"] = episode_length
+            stats["Sum of Rewards"] = episoderewards
             for k, v in stats.iteritems():
                 print(k + ": " + " " * (40 - len(k)) + str(v))
+
+            with open(config.log_dir + '/log.json', "w") as json_file:
+                for line in benchmark_results:
+                    json.dump(line, json_file)
+                    json_file.write('\n')
+                json_file.close()
 
             i += 1
 
@@ -273,6 +291,7 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
     tf.set_random_seed(args.seed)
     env = gym.make(args.env_id)
+
     if args.use_pixels:
         env = JacoCombiEnv(env, is_rgb=True, is_depth=True)
     else:

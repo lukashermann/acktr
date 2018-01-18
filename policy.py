@@ -179,8 +179,8 @@ def load_policy_net_rgb(obs, policy_vars, action_size):
 
     return output, intermediate_obs
 
-def load_policy_net(obs, policy_vars, hidden_sizes, nonlinear, action_size):
-    x = obs
+def load_policy_net_ss(obs_ss, policy_vars, hidden_sizes, nonlinear, action_size):
+    x = obs_ss
     for i in range(len(hidden_sizes)):
         x = tf.nn.bias_add(tf.matmul(x, policy_vars[2*i]), policy_vars[2*i+1])
         if nonlinear[i]:

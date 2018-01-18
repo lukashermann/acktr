@@ -76,9 +76,9 @@ parser.add_argument('--train-iter-vf', default=25, type=int,
                     help="Number of cold iterations using sgd")
 parser.add_argument('--moving-average-vf', default=0.0, type=float,
                     help="Moving average of VF parameters")
-parser.add_argument('--load-model', default=False, type=bool,
+parser.add_argument('--load-model', default=True, type=bool,
                     help="Load trained model")
-parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/logs/JacoPixel-v1_combi/openai-2017-10-12-13-02-30", type=str,
+parser.add_argument('--load-dir', default="/home/hermannl/master_project/git/emansim/acktr/experiments/JacoPushPixel-v1/acktr/2018-01-08-13-19-37", type=str,
                     help="Folder to load from")
 parser.add_argument('--is-rgb', default=True, type=bool,
                     help="Use RGB")
@@ -96,7 +96,6 @@ class AsyncNGAgent(object):
         self.env._env.seed(self.config.seed)
 
         self.config.max_pathlength = args.max_pathlength
-        print(self.config.max_pathlength)
 
         # set weight decay for fc and conv layers
         utils.weight_decay_fc = self.config.weight_decay_fc
